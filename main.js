@@ -369,22 +369,19 @@ let drag=null, moveDrag=null, cleared=false, freeDrag=false;
 // after CLEAR: lay the letters out left-to-right in a word's reading order (ease-out 400ms morph)
 let sorting=false, curBoard={tx:0,ty:0,s:1};
 function sortByColor(color){
-  if(!won()) return;
-  document.getElementById('winImg').style.display='none';   // expand to a clean readable view
+  if(!won()) return;   // keep the completion screen (illustration + shrunk layout); only rearrange letters
   const seen={}, order=[];
   for(const ch of chains[color].word){ if(!seen[ch]){ seen[ch]=1; order.push(ch); } }  // unique, word order
-  const n=order.length, gap=Math.min(150, 980/n), totalW=gap*(n-1), startX=CX-totalW/2, baseY=VH*0.5;
+  // wide enough spacing that the connecting arrows have a visible shaft
+  const n=order.length, gap=Math.max(260, Math.min(340, 1320/n)), totalW=gap*(n-1), startX=CX-totalW/2, baseY=VH*0.5;
   const target={};
-  order.forEach((id,i)=>{ target[id]=[ startX+i*gap+(Math.random()*2-1)*gap*0.12, baseY+(Math.random()*2-1)*70 ]; });
+  order.forEach((id,i)=>{ target[id]=[ startX+i*gap+(Math.random()*2-1)*gap*0.1, baseY+(Math.random()*2-1)*60 ]; });
   const from={}; order.forEach(id=> from[id]=positions[id].slice());
-  const b0={...curBoard}, b1={tx:0,ty:0,s:1};               // un-shrink the board so the word reads large
   const t0=performance.now(), DUR=400; sorting=true;
   (function tween(t){
     const k=Math.min(1,(t-t0)/DUR), e=1-Math.pow(1-k,3);    // easeOutCubic
     order.forEach(id=>{ positions[id]=[ from[id][0]+(target[id][0]-from[id][0])*e,
                                         from[id][1]+(target[id][1]-from[id][1])*e ]; });
-    curBoard={ tx:b0.tx+(b1.tx-b0.tx)*e, ty:b0.ty+(b1.ty-b0.ty)*e, s:b0.s+(b1.s-b0.s)*e };
-    boardG.setAttribute('transform',`translate(${curBoard.tx} ${curBoard.ty}) scale(${curBoard.s})`);
     if(k<1) requestAnimationFrame(tween); else sorting=false;
   })(t0);
 }

@@ -281,8 +281,17 @@ let maxDigitW=0;
 
 function renderIndicators(){
   const fmt=(word,prog)=> word.split('').map((ch,i)=> i<=prog?ch:'?').join('');
-  setText(document.getElementById('hudGreen'), fmt(GREEN,chains.green.prog), {x:34,y:790,size:30,color:'var(--green)',align:'left'});
-  setText(document.getElementById('hudRed'),   fmt(RED,chains.red.prog),     {x:1422,y:790,size:30,color:'var(--red)',align:'right'});
+  const gw=setText(document.getElementById('hudGreen'), fmt(GREEN,chains.green.prog), {x:34,y:790,size:30,color:'var(--green)',align:'left'});
+  const rw=setText(document.getElementById('hudRed'),   fmt(RED,chains.red.prog),     {x:1422,y:790,size:30,color:'var(--red)',align:'right'});
+  // after CLEAR, the word labels also sort the letters
+  indHit(document.getElementById('hudGreen'), 30, 754, gw+8, 56, 'green');
+  indHit(document.getElementById('hudRed'),   1422-rw-4, 754, rw+8, 56, 'red');
+}
+function indHit(container, x, y, w, h, color){
+  const r=document.createElementNS(NS,'rect');
+  r.setAttribute('class','hit'); r.setAttribute('x',x); r.setAttribute('y',y); r.setAttribute('width',w); r.setAttribute('height',h);
+  r.addEventListener('click', ()=>{ if(won()) sortByColor(color); });
+  container.appendChild(r);
 }
 let blink=true;
 function renderTimer(){
@@ -357,6 +366,28 @@ function letterAt(p){ let best=null,bd=1e9;
   for(const id in nodeEls){ const n=nodeEls[id]; const d=Math.hypot(p[0]-n.cx,p[1]-n.cy);
     if(d<n.rad && d<bd){ bd=d; best=id; } } return best; }
 let drag=null, moveDrag=null, cleared=false, freeDrag=false;
+// after CLEAR: lay the letters out left-to-right in a word's reading order (ease-out 400ms morph)
+let sorting=false, curBoard={tx:0,ty:0,s:1};
+function sortByColor(color){
+  if(!won()) return;
+  document.getElementById('winImg').style.display='none';   // expand to a clean readable view
+  const seen={}, order=[];
+  for(const ch of chains[color].word){ if(!seen[ch]){ seen[ch]=1; order.push(ch); } }  // unique, word order
+  const n=order.length, gap=Math.min(150, 980/n), totalW=gap*(n-1), startX=CX-totalW/2, baseY=VH*0.5;
+  const target={};
+  order.forEach((id,i)=>{ target[id]=[ startX+i*gap+(Math.random()*2-1)*gap*0.12, baseY+(Math.random()*2-1)*70 ]; });
+  const from={}; order.forEach(id=> from[id]=positions[id].slice());
+  const b0={...curBoard}, b1={tx:0,ty:0,s:1};               // un-shrink the board so the word reads large
+  const t0=performance.now(), DUR=400; sorting=true;
+  (function tween(t){
+    const k=Math.min(1,(t-t0)/DUR), e=1-Math.pow(1-k,3);    // easeOutCubic
+    order.forEach(id=>{ positions[id]=[ from[id][0]+(target[id][0]-from[id][0])*e,
+                                        from[id][1]+(target[id][1]-from[id][1])*e ]; });
+    curBoard={ tx:b0.tx+(b1.tx-b0.tx)*e, ty:b0.ty+(b1.ty-b0.ty)*e, s:b0.s+(b1.s-b0.s)*e };
+    boardG.setAttribute('transform',`translate(${curBoard.tx} ${curBoard.ty}) scale(${curBoard.s})`);
+    if(k<1) requestAnimationFrame(tween); else sorting=false;
+  })(t0);
+}
 function candidatesFor(id){
   if(active!==null)   // already building one colour: only that colour is connectable
     return (!isComplete(active) && chains[active].word[chains[active].prog]===id) ? [active] : [];
@@ -371,8 +402,9 @@ function moveLetterTo(p){
 }
 function onDown(ev){
   const p=toSvg(ev);
-  if(freeDrag){ const id=letterAt(p); if(!id) return; ev.preventDefault();   // title & post-clear: move letters
-    moveDrag={ id, off:[nodeEls[id].cx-p[0], nodeEls[id].cy-p[1]] }; return; }
+  if(freeDrag){ const mk=markerAt(p); const id=mk?mk.id:letterAt(p); if(!id) return; ev.preventDefault();
+    // marker can be tapped (sort) or dragged (move); a letter is just dragged
+    moveDrag={ id, off:[nodeEls[id].cx-p[0], nodeEls[id].cy-p[1]], down:p, marker:mk?mk.color:null, moved:false }; return; }
   if(!started || paused||won()) return;
   const mk=markerAt(p);
   const id=mk?mk.id:letterAt(p); if(!id) return;       // letter OR its marker can be grabbed
@@ -394,7 +426,9 @@ function updateProv(p){
   drag.shaft.setAttribute('d',`M ${sx} ${sy} L ${p[0]} ${p[1]}`);
 }
 function onMove(ev){
-  if(moveDrag){ ev.preventDefault(); moveLetterTo(toSvg(ev)); return; }
+  if(moveDrag){ ev.preventDefault(); const p=toSvg(ev);
+    if(Math.hypot(p[0]-moveDrag.down[0],p[1]-moveDrag.down[1])>6) moveDrag.moved=true;
+    moveLetterTo(p); return; }
   if(drag){
     ev.preventDefault();
     const p=toSvg(ev); updateProv(p);
@@ -415,7 +449,9 @@ function onMove(ev){
 }
 function clearOutlines(){ for(const k in nodeEls) nodeEls[k].outline.style.visibility='hidden'; }
 function onUp(ev){
-  if(moveDrag){ moveDrag=null; return; }
+  if(moveDrag){ const md=moveDrag; moveDrag=null;
+    if(md.marker && !md.moved) sortByColor(md.marker);   // tapped a marker (no drag) -> sort
+    return; }
   if(!drag) return;
   const p=toSvg(ev); const target=letterAt(p);
   let solvedColor=null;
@@ -502,7 +538,8 @@ function endHint(){
 function onWin(){
   renderTimer();                                   // timer -> CLEAR! (text.svg)
   document.getElementById('hudHint').style.display='none';
-  boardG.setAttribute('transform','translate(30 10) scale(0.55)'); // clear screen: shrink anagram
+  curBoard={tx:30,ty:10,s:0.55};                    // clear screen: shrink anagram
+  boardG.setAttribute('transform',`translate(${curBoard.tx} ${curBoard.ty}) scale(${curBoard.s})`);
   winImg.style.display='';                          // reveal the illustration
   cleared = true; freeDrag = true;                  // letters stay draggable, arrows follow
   requestAnimationFrame(floatLoop);                 // letters drift gently to show they're touchable

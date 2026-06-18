@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ANAGRAM EDITOR — SWAY WAYS</title>
+<style>
+  :root{ --red:#e83817; --green:#43b149; --ink:#231815; --gray:#bdbdbd; --sel:#cfe6ff; }
+  html,body{ margin:0; height:100%; background:#fff; }
+  #wrap{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; }
+  svg{ width:100%; height:100%; }
+  .hit{ fill:#000; fill-opacity:0; }
+  .clk{ cursor:pointer; }
+  .ibeam{ cursor:text; }
+  @keyframes blink{ 0%,49%{opacity:1} 50%,100%{opacity:0} }
+  .caret{ animation:blink 1s steps(1) infinite; }
+  @keyframes shake{ 0%,100%{transform:translateX(0)} 20%{transform:translateX(-10px)} 40%{transform:translateX(9px)} 60%{transform:translateX(-7px)} 80%{transform:translateX(5px)} }
+  .shake{ animation:shake .4s ease; }
+  @keyframes bounce{ 0%{transform:scale(1)} 50%{transform:scale(1.14)} 100%{transform:scale(1)} }
+  .bounce{ animation:bounce .1s ease; }
+  .row{ transition:transform .1s ease-out; }
+  .listbtn{ transition:transform .1s ease-out; }
+  /* 画面スライド（400ms イーズアウト） */
+  #listScreen{ transition:transform .4s ease-out; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <svg id="ed" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1456 819" preserveAspectRatio="xMidYMid meet">
+    <g id="measure" style="visibility:hidden"></g>
+    <g id="editScreen"></g>
+    <g id="listScreen"></g>
+  </svg>
+</div>
+<input id="svgPicker" type="file" accept=".svg,image/svg+xml" style="display:none">
+
+<script src="glyphs.js"></script>
+<script src="quizzes.js"></script>
+<script src="words.js"></script>
+<script>
+/* =========================================================================
+   ANAGRAM EDITOR （素のJS・ビルド不要。glyphs.js のフォントで描画）
+   ベースライン: 各グリフの b（SVGのアセンダ/ディセンダ基準の baseline）で組む。
+   ========================================================================= */
+const NS='http://www.w3.org/2000/svg';
+const VW=1456, VH=819;
+const GLYPHS=window.GLYPHS;
+const COL={ ink:'#231815', gray:'#bdbdbd', green:'#43b149', red:'#e83817', sel:'#cfe6ff' };
+const ed=document.getElementById('ed');
+const measure=document.getElementById('measure');
+const editScreen=document.getElementById('editScreen');
+const listScreen=document.getElementById('listScreen');
+
+/* ---- グリフ計測 ---- */
+const _mc={};
+function glyphMetrics(ch){
+  if(_mc[ch]) return _mc[ch];
+  const g=GLYPHS[ch];
+  if(!g) return _mc[ch]={xmin:0,ymin:0,ymax:0,w:40,b:0};
+  const p=document.createElementNS(NS,'path'); p.setAttribute('d',g.d);
+  measure.appendChild(p); const b=p.getBBox(); measure.removeChild(p);
+  return _mc[ch]={xmin:b.x, ymin:b.y, ymax:b.y+b.height, w:b.width, b:g.b};
+}
+// cap height（'H' の baseline から ink 上端まで）を基準サイズに
+const CAP=(function(){ const m=glyphMetrics('H'); return GLYPHS['H'].b - m.ymin; })();
+const EMK=1.56;                         // em(asc→desc) / cap の概算（行間用）
+const SPACE=0.45;
+const SPACING=0.12;             // 比例詰め後の均一字間（cap比）。default(約0.10)+15%。
+const SYNTH={'-':0.5,'.':0.32,'"':0.42};
+const EM=CAP*EMK;
+const Sf=SPACING*CAP;           // 字間（フォント単位）
+
+// グリフ輪郭の左右プロファイル（baseline基準の y バンドごと min/max x）→ 光学カーニング用
+const _prof={};
+function glyphProfile(ch){
+  if(ch in _prof) return _prof[ch];
+  const gl=GLYPHS[ch]; if(!gl) return _prof[ch]=null;
+  const p=document.createElementNS(NS,'path'); p.setAttribute('d',gl.d); measure.appendChild(p);
+  let L=0; try{ L=p.getTotalLength(); }catch(e){}
+  const N=Math.max(80,Math.min(500,Math.round(L/2.5)||120));
+  const BH=CAP/14, bands={}; let xmin=1e9,xmax=-1e9;
+  for(let i=0;i<=N;i++){ let pt; try{ pt=p.getPointAtLength(L*i/N); }catch(e){ break; }
+    const k=Math.round((pt.y-gl.b)/BH); const e=bands[k]||(bands[k]={mn:1e9,mx:-1e9});
+    if(pt.x<e.mn)e.mn=pt.x; if(pt.x>e.mx)e.mx=pt.x;
+    if(pt.x<xmin)xmin=pt.x; if(pt.x>xmax)xmax=pt.x; }
+  measure.removeChild(p);
+  if(xmax<xmin) return _prof[ch]=null;   // サンプル不可（環境依存）→ カーニング無効でフォールバック
+  return _prof[ch]={bands,xmin,xmax};
+}
+// 隣接グリフ a→b の送り（a.xmin→b.xmin、フォント単位）。輪郭の重なりを詰める。
+function pairAdvance(a,b){
+  const pa=glyphProfile(a), pb=glyphProfile(b);
+  const aw=pa?(pa.xmax-pa.xmin):(glyphMetrics(a).w);
+  if(!pa||!pb) return aw+Sf;
+  let K=Infinity;
+  for(const k in pa.bands){ const e=pb.bands[k]; if(e){ const v=(pa.xmax-pa.bands[k].mx)+(e.mn-pb.xmin); if(v<K)K=v; } }
+  if(!isFinite(K)) K=0;
+  return aw+Sf-K;
+}
+// 各文字のキャレットx（px）配列と総幅
+function layoutPx(str,size){
+  const sc=size/CAP, chars=[...str], pos=[0]; let cur=0;
+  for(let i=0;i<chars.length;i++){ const ch=chars[i], nx=chars[i+1];
+    const w = ch===' '? SPACE*size : (GLYPHS[ch]? glyphMetrics(ch).w*sc : (SYNTH[ch]!=null?SYNTH[ch]:0.4)*size);
+    let advc;
+    if(i===chars.length-1) advc=w;
+    else if(ch!==' '&&nx!==' '&&GLYPHS[ch]&&GLYPHS[nx]) advc=pairAdvance(ch,nx)*sc;
+    else advc=w+Sf*sc;
+    cur+=advc; pos.push(cur);
+  }
+  return {pos,w:cur,sc};
+}
+function textWidth(str,size){ return layoutPx(str,size).w; }
+// フォント外記号（- . "）の簡易シェイプ（baseline=0 基準）
+function drawSynth(g,ch,cur,size,col){
+  const add=(x,y,w,h)=>{ const r=document.createElementNS(NS,'rect');
+    r.setAttribute('x',x); r.setAttribute('y',y); r.setAttribute('width',w); r.setAttribute('height',h);
+    r.setAttribute('fill',col); g.appendChild(r); };
+  if(ch==='-'){ add(cur+size*0.06, -size*0.40, size*0.38, size*0.11); }
+  else if(ch==='.'){ add(cur+size*0.02, -size*0.13, size*0.13, size*0.13); }
+  else if(ch==='"'){ add(cur+size*0.04, -size*0.95, size*0.07, size*0.26); add(cur+size*0.22, -size*0.95, size*0.07, size*0.26); }
+}
+// str を <g> に積む。原点 = 左端・baseline。color は配列可。_pos[]=各キャレットx
+function buildText(str, size, color){
+  const g=document.createElementNS(NS,'g'); const {pos,sc}=layoutPx(str,size); let i=0;
+  for(const ch of [...str]){
+    const col = Array.isArray(color)? (color[i]||COL.ink) : color; const x=pos[i];
+    if(ch!==' '){ const gl=GLYPHS[ch];
+      if(gl){ const m=glyphMetrics(ch);
+        const p=document.createElementNS(NS,'path'); p.setAttribute('d',gl.d); p.setAttribute('fill',col);
+        p.setAttribute('transform',`translate(${x-m.xmin*sc} ${-gl.b*sc}) scale(${sc})`); g.appendChild(p);
+      } else { drawSynth(g,ch,x,size,col); }
+    }
+    i++;
+  }
+  g._w=pos[pos.length-1]; g._pos=pos;
+  return g;
+}
+function place(container, str, {x=0,y=0,size=40,color=COL.ink,align='left'}={}){
+  const g=buildText(str,size,color); const w=g._w;
+  const tx = align==='center'? x-w/2 : align==='right'? x-w : x;
+  g.setAttribute('transform',`translate(${tx} ${y})`);
+  container.appendChild(g); g._x=tx; g._width=w;
+  return g;
+}
+function hit(container,x,y,w,h,on,cls){
+  const r=document.createElementNS(NS,'rect'); r.setAttribute('class','hit'+(cls?' '+cls:''));
+  r.setAttribute('x',x); r.setAttribute('y',y); r.setAttribute('width',w); r.setAttribute('height',h);
+  if(on) r.addEventListener('click',on); container.appendChild(r); return r;
+}
+function rrect(container,x,y,w,h,r,stroke,fill){
+  const e=document.createElementNS(NS,'rect');
+  e.setAttribute('x',x); e.setAttribute('y',y); e.setAttribute('width',w); e.setAttribute('height',h);
+  e.setAttribute('rx',r); e.setAttribute('ry',r);
+  e.setAttribute('fill',fill||'none'); if(stroke){ e.setAttribute('stroke',stroke); e.setAttribute('stroke-width',3); }
+  container.appendChild(e); return e;
+}
+const clean=s=>(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+
+/* ---- ゲームと同じ矢印（シャフト＋ヘッドを一体化した塗りシルエット） ---- */
+function arrowPath(dir,len,th,headL,headW){
+  if(dir==='right'){
+    return `M0 ${-th/2} L${len-headL} ${-th/2} L${len-headL} ${-headW} L${len} 0 `
+         + `L${len-headL} ${headW} L${len-headL} ${th/2} L0 ${th/2} Z`;
+  }
+  return `M${len} ${-th/2} L${headL} ${-th/2} L${headL} ${-headW} L0 0 `
+       + `L${headL} ${headW} L${headL} ${th/2} L${len} ${th/2} Z`;
+}
+// baseline 基準で矢印を置く。中心線 = baseline - size/2（cap中央）。返り値: {g,len}
+function placeArrow(container, x, baseY, size, dir, color){
+  const len=size*1.05, th=size*0.17, headL=size*0.52, headW=size*0.50;
+  const g=document.createElementNS(NS,'g');
+  const p=document.createElementNS(NS,'path');
+  p.setAttribute('d',arrowPath(dir,len,th,headL,headW)); p.setAttribute('fill',color);
+  g.appendChild(p);
+  g.setAttribute('transform',`translate(${x} ${baseY - size*0.5})`);
+  container.appendChild(g); g._len=len;
+  return g;
+}
+
+/* =========================================================================
+   データ（作業用リスト。QUIZZES の複製）
+   ord 大きいほど新しい＝上に表示。配列先頭を一番上にする。
+   ========================================================================= */
+let LIST=(function(){ const s=(window.QUIZZES||[]); return s.map((q,i)=>({ id:q.id, green:q.green, red:q.red, hint:q.hint||'', animation:q.animation||'', ord:s.length-1-i })); })();
+let ordSeq=LIST.length;
+function strip(){ return LIST.slice().sort((a,b)=>b.ord-a.ord).map(q=>({id:q.id,green:q.green,red:q.red,hint:q.hint||'',animation:q.animation||''})); }
+// 変更を quizzes.js に反映（ダウンロード）
+function commit(){ window.QuizStore.exportJS(strip()); }
+
+/* =========================================================================
+   EDIT 画面の状態（テキスト編集：caret/anchor、選択対応）
+   ========================================================================= */
+const B={ green:{v:'',c:0,a:0}, red:{v:'',c:0,a:0} };
+let focusBox='green';
+let editingId=null, saved=false, saveMsg='', shakeBox=null;
+
+const BOX={ green:{x:130,y:315,w:400,h:150}, red:{x:700,y:315,w:400,h:150} };
+const BOX_MAX=72, BOX_PAD=34;
+
+function gv(){return B.green.v;} function rv(){return B.red.v;}
+function selRange(b){ return [Math.min(b.c,b.a),Math.max(b.c,b.a)]; }
+function afterEdit(){ saved=false; saveMsg=''; shakeBox=null; drawEdit(); }
+function insert(ins){ const b=B[focusBox]; const [s,e]=selRange(b); b.v=(b.v.slice(0,s)+ins+b.v.slice(e)).slice(0,12); b.c=b.a=Math.min(b.v.length,s+ins.length); afterEdit(); }
+function del(forward){ const b=B[focusBox]; const [s,e]=selRange(b);
+  if(s!==e){ b.v=b.v.slice(0,s)+b.v.slice(e); b.c=b.a=s; }
+  else if(forward){ b.v=b.v.slice(0,s)+b.v.slice(s+1); }
+  else if(s>0){ b.v=b.v.slice(0,s-1)+b.v.slice(s); b.c=b.a=s-1; }
+  afterEdit(); }
+function moveCaret(delta,shift){ const b=B[focusBox]; const nc=Math.max(0,Math.min(b.v.length,b.c+delta)); b.c=nc; if(!shift) b.a=nc; drawEdit(); }
+function caretTo(idx,shift){ const b=B[focusBox]; b.c=Math.max(0,Math.min(b.v.length,idx)); if(!shift) b.a=b.c; drawEdit(); }
+function selectAll(){ const b=B[focusBox]; b.a=0; b.c=b.v.length; drawEdit(); }
+
+function fitSize(str){ if(!str) return BOX_MAX; const w=textWidth(str,BOX_MAX); const maxW=BOX.green.w-2*BOX_PAD; return w<=maxW? BOX_MAX : BOX_MAX*maxW/w; }
+
+function validity(){
+  const g=clean(gv()), r=clean(rv());
+  const res={green:true, red:true, ok:false};
+  if(!g||!r){ res.green=!!g; res.red=!!r; return res; }
+  const realG=!window.isWord||window.isWord(g), realR=!window.isWord||window.isWord(r);
+  const anag=g.split('').sort().join('')===r.split('').sort().join('') && g!==r;
+  res.green=realG; res.red=realR; res.ok=realG&&realR&&anag;
+  if(!anag && realG && realR) res.red=false;
+  return res;
+}
+
+/* ---- ドラッグ選択の状態 ---- */
+let dragBox=null;
+function boxIndexAtX(color,clientLocalX){
+  // 再構築して _pos からクリック位置に最も近い caret index を求める
+  const b=B[color]; const size=fitSize(b.v);
+  const w=textWidth(b.v,size); const cx=BOX[color].x+BOX[color].w/2; const startX=cx-w/2;
+  const g=buildText(b.v,size,COL.ink); const pos=g._pos;
+  let best=0,bd=1e9;
+  for(let i=0;i<pos.length;i++){ const px=startX+pos[i]; const d=Math.abs(px-clientLocalX); if(d<bd){bd=d;best=i;} }
+  return best;
+}
+
+function drawEdit(){
+  editScreen.innerHTML='';
+  const bg=document.createElementNS(NS,'rect'); bg.setAttribute('width',VW); bg.setAttribute('height',VH); bg.setAttribute('fill','#fff'); editScreen.appendChild(bg);
+  const HB=92;   // ヘッダ baseline
+  place(editScreen,'ANAGRAM EDITOR',{x:728,y:HB,size:66,color:COL.ink,align:'center'});
+  place(editScreen,'EXIT',{x:55,y:HB,size:34,color:COL.gray}).classList.add('clk');
+  hit(editScreen,40,HB-34,150,55,()=>{ location.href='index.html'; },'clk');
+
+  // ←LIST（矢印＝ゲーム矢印。hover で20px左、クリックでLISTをスライドイン）
+  const listG=document.createElementNS(NS,'g'); editScreen.appendChild(listG);
+  const lt=place(listG,'LIST',{x:1416,y:HB,size:48,color:COL.ink,align:'right'});
+  const arrowWrap=document.createElementNS(NS,'g'); arrowWrap.classList.add('listbtn'); listG.appendChild(arrowWrap);
+  placeArrow(arrowWrap, lt._x-58, HB, 48, 'left', COL.ink);
+  const lh=hit(editScreen,1245,HB-44,180,62,openList,'clk');
+  lh.addEventListener('mouseenter',()=>arrowWrap.style.transform='translateX(-20px)');
+  lh.addEventListener('mouseleave',()=>arrowWrap.style.transform='translateX(0)');
+
+  const v=validity();
+  drawBox('green',v.green);
+  drawBox('red',v.red);
+
+  // SWAP
+  const sw=document.createElementNS(NS,'g'); editScreen.appendChild(sw);
+  place(sw,'SWAP',{x:615,y:372,size:28,color:COL.ink,align:'center'});
+  const line=document.createElementNS(NS,'path'); line.setAttribute('d','M560 395 L670 395'); line.setAttribute('stroke',COL.ink); line.setAttribute('stroke-width',6); sw.appendChild(line);
+  hit(editScreen,555,355,120,80,doSwap,'clk');
+
+  // SAVE
+  const saveG=document.createElementNS(NS,'g'); editScreen.appendChild(saveG);
+  const scol=(v.ok&&!saved)?COL.ink:COL.gray;
+  rrect(saveG,1150,358,240,70,35,scol,'#fff');
+  place(saveG,'SAVE',{x:1270,y:407,size:50,color:scol,align:'center'});
+  if(v.ok&&!saved) hit(editScreen,1150,358,240,70,doSave,'clk');
+  if(saveMsg) place(editScreen,saveMsg,{x:1270,y:470,size:26,color:saveMsg==='SUCCESS!'?COL.ink:COL.red,align:'center'});
+
+  // IMPORT SVG（保存後のみ可。キャプションは保存名をプレビュー、可になるまで非表示）
+  const impG=document.createElementNS(NS,'g'); editScreen.appendChild(impG);
+  const icol=saved?COL.ink:COL.gray;
+  rrect(impG,508,614,440,72,36,icol,'#fff');
+  place(impG,'IMPORT SVG',{x:728,y:664,size:46,color:icol,align:'center'});
+  if(saved){
+    const fname=(editingId||window.QUIZ.makeId(gv(),rv()))+'.svg';
+    place(editScreen,'RENAME AS - '+fname.toUpperCase(),{x:728,y:712,size:20,color:COL.gray,align:'center'});
+    hit(editScreen,508,614,440,72,()=>document.getElementById('svgPicker').click(),'clk');
+  }
+}
+
+function drawBox(color,valid){
+  const stroke=color==='green'?COL.green:COL.red;
+  const o=BOX[color]; const b=B[color];
+  const wrap=document.createElementNS(NS,'g'); editScreen.appendChild(wrap);
+  if(!valid && shakeBox===color) wrap.classList.add('shake');
+  rrect(wrap,o.x,o.y,o.w,o.h,0,stroke,'#fff');
+  const size=fitSize(b.v);
+  const cx=o.x+o.w/2, baseY=o.y+o.h/2+size*0.5;
+  const w=textWidth(b.v,size), startX=cx-w/2;
+  const tg=buildText(b.v,size,COL.ink); const pos=tg._pos;
+  // 選択ハイライト
+  if(focusBox===color){ const [s,e]=selRange(b);
+    if(s!==e){ const r=document.createElementNS(NS,'rect');
+      r.setAttribute('x',startX+pos[s]); r.setAttribute('y',baseY-size); r.setAttribute('width',(pos[e]-pos[s])); r.setAttribute('height',size*1.18);
+      r.setAttribute('fill',COL.sel); wrap.appendChild(r); }
+  }
+  // テキスト
+  tg.setAttribute('transform',`translate(${startX} ${baseY})`); wrap.appendChild(tg);
+  // キャレット（フォーカス時・選択なし時に点滅）
+  if(focusBox===color){ const [s,e]=selRange(b);
+    const cxp=startX+pos[b.c];
+    const caret=document.createElementNS(NS,'rect');
+    caret.setAttribute('x',cxp-1); caret.setAttribute('y',baseY-size); caret.setAttribute('width',2); caret.setAttribute('height',size*1.1);
+    caret.setAttribute('fill',COL.ink); if(s===e) caret.setAttribute('class','caret'); wrap.appendChild(caret);
+  }
+  // クリック/ドラッグ選択
+  const h=hit(editScreen,o.x,o.y,o.w,o.h,null,'ibeam');
+  h.addEventListener('mousedown',ev=>{ const x=localX(ev); focusBox=color; const idx=boxIndexAtX(color,x); b.c=b.a=idx; dragBox=color; drawEdit(); ev.preventDefault(); });
+}
+
+// クライアント座標 → SVG ローカルx
+function localX(ev){ const pt=ed.createSVGPoint(); pt.x=ev.clientX; pt.y=ev.clientY; const m=ed.getScreenCTM().inverse(); return pt.matrixTransform(m).x; }
+window.addEventListener('mousemove',ev=>{ if(dragBox){ const x=localX(ev); const idx=boxIndexAtX(dragBox,x); B[dragBox].c=idx; drawEdit(); } });
+window.addEventListener('mouseup',()=>{ dragBox=null; });
+
+function doSwap(){ const t=B.green.v; B.green.v=B.red.v; B.red.v=t;
+  B.green.c=B.green.a=B.green.v.length; B.red.c=B.red.a=B.red.v.length;
+  saved=false; saveMsg=''; shakeBox=null; drawEdit();
+  [...editScreen.querySelectorAll('rect')].slice(1,3).forEach(r=>{ r.classList.remove('bounce'); void r.getBBox(); r.classList.add('bounce'); });
+}
+function doSave(){
+  const v=validity();
+  if(!v.ok){ saveMsg='FAILED'; shakeBox=!v.red?'red':(!v.green?'green':'red'); drawEdit(); setTimeout(()=>{shakeBox=null;},450); return; }
+  const g=clean(gv()), r=clean(rv()); const id=window.QUIZ.makeId(g,r);
+  const item={ id, green:g, red:r, hint:'', animation:'' };
+  let idx=LIST.findIndex(q=>q.id===(editingId||id));
+  if(idx>=0){ item.hint=LIST[idx].hint; item.animation=LIST[idx].animation; item.ord=LIST[idx].ord; LIST[idx]=item; }
+  else { item.ord=ordSeq++; LIST.unshift(item); }
+  editingId=id; saved=true; saveMsg='SUCCESS!'; shakeBox=null; drawEdit();
+  commit();   // quizzes.js に反映
+}
+
+document.getElementById('svgPicker').addEventListener('change',e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const id=editingId||window.QUIZ.makeId(gv(),rv()); const newName=id+'.svg';
+  const r=new FileReader();
+  r.onload=()=>{ const b=new Blob([r.result],{type:'image/svg+xml'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=newName;
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+    const i=LIST.findIndex(q=>q.id===id); if(i>=0){ LIST[i].hint=newName; commit(); }
+    saveMsg='SAVED: '+newName; drawEdit();
+    alert('「'+newName+'」をダウンロードしました。svg/ フォルダに入れてください。');
+  };
+  r.readAsText(f); e.target.value='';
+});
+
+/* =========================================================================
+   LIST 画面
+   ========================================================================= */
+let selId=null, sortMode='new', sortRev=false, deleteMode=false, listOpen=false;
+const LIST_X=372, COL_R=1110;
+const LIST_SIZE=52, ROW=Math.round(LIST_SIZE*EMK*1.25);   // 行間=文字高さの125%
+const GRID_TOP=92;   // 1行目 baseline（ヘッダと共通グリッド）
+
+function sortedList(){
+  let a=LIST.slice();
+  if(sortMode==='new') a.sort((p,q)=>q.ord-p.ord);
+  else if(sortMode==='az') a.sort((p,q)=>(p.green+'-'+p.red).localeCompare(q.green+'-'+q.red));
+  else if(sortMode==='len') a.sort((p,q)=>(p.green.length+p.red.length)-(q.green.length+q.red.length));
+  if(sortRev) a.reverse();
+  return a;
+}
+function openList(){
+  const a=sortedList(); if(!a.length) selId=null; else if(!a.find(q=>q.id===selId)) selId=a[0].id;
+  deleteMode=false; drawList();
+  listOpen=true; editScreen.style.pointerEvents='none'; listScreen.style.pointerEvents='auto';
+  listScreen.style.transition='none'; listScreen.style.transform='translateX('+VW+'px)';
+  requestAnimationFrame(()=>{ listScreen.style.transition='transform .4s ease-out'; listScreen.style.transform='translateX(0)'; });
+}
+function closeList(){
+  listScreen.style.transition='transform .4s ease-out'; listScreen.style.transform='translateX('+VW+'px)';
+  listOpen=false; editScreen.style.pointerEvents='auto';
+  setTimeout(()=>{ listScreen.style.pointerEvents='none'; },400);
+}
+function oneA(size){ return glyphMetrics('A').w*(size/CAP); }
+
+function drawList(){
+  listScreen.innerHTML='';
+  const bg=document.createElementNS(NS,'rect'); bg.setAttribute('width',VW); bg.setAttribute('height',VH); bg.setAttribute('fill','#fff'); listScreen.appendChild(bg);
+
+  // CLOSE→（ゲーム矢印・右向き）
+  const closeG=document.createElementNS(NS,'g'); listScreen.appendChild(closeG);
+  const ct=place(closeG,'CLOSE',{x:40,y:GRID_TOP,size:50,color:deleteMode?COL.gray:COL.ink});
+  const carrow=document.createElementNS(NS,'g'); carrow.classList.add('listbtn'); closeG.appendChild(carrow);
+  placeArrow(carrow, ct._x+ct._width+14, GRID_TOP, 50, 'right', deleteMode?COL.gray:COL.ink);
+  if(!deleteMode){ const chh=hit(listScreen,30,GRID_TOP-46,300,62,closeList,'clk');
+    chh.addEventListener('mouseenter',()=>carrow.style.transform='translateX(20px)');
+    chh.addEventListener('mouseleave',()=>carrow.style.transform='translateX(0)'); }
+
+  // 仕切り線
+  for(const lx of [340,1080]){ const l=document.createElementNS(NS,'line');
+    l.setAttribute('x1',lx); l.setAttribute('y1',0); l.setAttribute('x2',lx); l.setAttribute('y2',VH);
+    l.setAttribute('stroke',COL.ink); l.setAttribute('stroke-width',2); listScreen.appendChild(l); }
+
+  // 単語リスト
+  const rowsG=document.createElementNS(NS,'g'); listScreen.appendChild(rowsG);
+  const arr=sortedList(); const aw=oneA(LIST_SIZE);
+  arr.forEach((q,i)=>{
+    const sel=q.id===selId, dim=deleteMode&&!sel, colored=sel&&!deleteMode;
+    const row=document.createElementNS(NS,'g'); row.classList.add('row'); rowsG.appendChild(row);
+    const y=GRID_TOP+i*ROW; const txt=q.green+'-'+q.red;
+    drawEntry(row,q,y,colored,dim);
+    row.style.transform=sel?`translateX(${aw}px)`:'translateX(0)';
+    if(!deleteMode){
+      const hh=hit(row,LIST_X-10,y-LIST_SIZE,690,ROW,()=>{ selId=q.id; drawList(); },'clk');
+      hh.addEventListener('mouseenter',()=>{ if(q.id!==selId){ row.style.transform=`translateX(${aw}px)`; row.querySelector('g')&&row.querySelector('g').remove(); drawEntry(row,q,y,true,false); } });
+      hh.addEventListener('mouseleave',()=>{ if(q.id!==selId){ row.style.transform='translateX(0)'; row.querySelector('g')&&row.querySelector('g').remove(); drawEntry(row,q,y,false,false); } });
+    }
+  });
+
+  drawActions();
+
+  // 並べ替え
+  const sorts=[['new','NEW-OLD','OLD-NEW'],['az','A-Z','Z-A'],['len','SHORT-LONG','LONG-SHORT']];
+  sorts.forEach((s,i)=>{
+    const active=sortMode===s[0]; const label=active&&sortRev?s[2]:s[1];
+    const t=place(listScreen,label,{x:COL_R,y:648+i*54,size:26,color:deleteMode?COL.gray:(active?COL.ink:COL.gray)});
+    if(!deleteMode){ t.classList.add('clk'); hit(listScreen,COL_R-5,648+i*54-26,300,40,()=>{ if(sortMode===s[0]) sortRev=!sortRev; else {sortMode=s[0];sortRev=false;} drawList(); },'clk'); }
+  });
+}
+function drawEntry(row,q,y,colored,dim){
+  const txt=q.green+'-'+q.red;
+  let colors;
+  if(dim) colors=Array(txt.length).fill(COL.gray);
+  else if(colored){ colors=[]; for(let k=0;k<q.green.length;k++)colors.push(COL.green); colors.push(COL.ink); for(let k=0;k<q.red.length;k++)colors.push(COL.red); }
+  else colors=COL.ink;
+  // 行内テキストは先頭に挿入（hit より下）
+  const g=buildText(txt,LIST_SIZE,colors); g.setAttribute('transform',`translate(${LIST_X} ${y})`);
+  row.insertBefore(g,row.firstChild);
+}
+
+function drawActions(){
+  [...listScreen.querySelectorAll('.act')].forEach(n=>n.remove());
+  const sel=LIST.find(q=>q.id===selId);
+  const mk=(label,y,color,on)=>{ const t=place(listScreen,label,{x:COL_R,y,size:52,color}); t.classList.add('act'); if(color!==COL.gray) t.classList.add('clk');
+    if(on){ const h=hit(listScreen,COL_R-5,y-52,320,ROW,on); h.classList.add('act','clk'); } };
+  const r0=GRID_TOP, r1=GRID_TOP+ROW, r2=GRID_TOP+2*ROW;
+  if(!deleteMode){
+    mk('EDIT',r0, sel?COL.ink:COL.gray, sel?doEditSelected:null);
+    mk('SWAP',r1, sel?COL.ink:COL.gray, sel?doSwapSelected:null);
+    mk('DELETE',r2, sel?COL.ink:COL.gray, sel?enterDelete:null);
+  } else {
+    mk('EDIT',r0, COL.gray, null);     // DELETE中もグレーアウトで表示
+    mk('SWAP',r1, COL.gray, null);
+    mk('DELETE?',r2, COL.red, null);
+    const no=place(listScreen,'NO',{x:COL_R,y:GRID_TOP+3*ROW,size:52,color:COL.ink}); no.classList.add('act','clk');
+    const yes=place(listScreen,'YES',{x:COL_R,y:GRID_TOP+4*ROW,size:52,color:COL.ink}); yes.classList.add('act','clk');
+    const nh=hit(listScreen,COL_R-5,GRID_TOP+3*ROW-52,320,ROW,exitDelete); nh.classList.add('act','clk');
+    nh.addEventListener('mouseenter',()=>no.querySelectorAll('path,rect').forEach(p=>p.getAttribute('fill')&&p.setAttribute('fill',COL.green)));
+    nh.addEventListener('mouseleave',()=>no.querySelectorAll('path,rect').forEach(p=>p.getAttribute('fill')&&p.setAttribute('fill',COL.ink)));
+    const yh=hit(listScreen,COL_R-5,GRID_TOP+4*ROW-52,320,ROW,confirmDelete); yh.classList.add('act','clk');
+    yh.addEventListener('mouseenter',()=>yes.querySelectorAll('path,rect').forEach(p=>p.getAttribute('fill')&&p.setAttribute('fill',COL.red)));
+    yh.addEventListener('mouseleave',()=>yes.querySelectorAll('path,rect').forEach(p=>p.getAttribute('fill')&&p.setAttribute('fill',COL.ink)));
+  }
+}
+function doEditSelected(){ const q=LIST.find(x=>x.id===selId); if(!q) return;
+  B.green.v=q.green; B.red.v=q.red; B.green.c=B.green.a=q.green.length; B.red.c=B.red.a=q.red.length;
+  editingId=q.id; focusBox='green'; saved=false; saveMsg=''; shakeBox=null; drawEdit(); closeList();
+}
+function doSwapSelected(){ const q=LIST.find(x=>x.id===selId); if(!q) return;
+  const t=q.green; q.green=q.red; q.red=t; q.id=window.QUIZ.makeId(q.green,q.red); selId=q.id; drawList(); commit();
+}
+function enterDelete(){ deleteMode=true; drawList(); }
+function exitDelete(){ deleteMode=false; drawList(); }
+function confirmDelete(){ const i=LIST.findIndex(q=>q.id===selId); if(i<0){ exitDelete(); return; }
+  LIST.splice(i,1); deleteMode=false; const a=sortedList(); selId=a.length?a[0].id:null; drawList(); commit();
+}
+
+/* =========================================================================
+   キーボード
+   ========================================================================= */
+window.addEventListener('keydown',e=>{
+  if(listOpen){
+    if(deleteMode){ if(e.key==='Escape') exitDelete(); return; }
+    const a=sortedList(); const i=a.findIndex(q=>q.id===selId);
+    if(e.key==='ArrowDown'){ e.preventDefault(); if(a.length) selId=a[Math.min(a.length-1,i+1)].id, drawList(); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); if(a.length) selId=a[Math.max(0,i-1)].id, drawList(); }
+    else if(e.key==='e'||e.key==='E'){ if(selId) doEditSelected(); }
+    else if(e.key==='s'||e.key==='S'){ if(selId) doSwapSelected(); }
+    else if(e.key==='Delete'||e.key==='Backspace'){ e.preventDefault(); if(selId) enterDelete(); }
+    else if(e.key==='Escape'){ closeList(); }
+    return;
+  }
+  // EDIT 画面（テキスト編集）
+  if((e.metaKey||e.ctrlKey) && (e.key==='Enter')){ e.preventDefault(); if(validity().ok && !saved) doSave(); return; }
+  if((e.metaKey||e.ctrlKey) && (e.key==='a'||e.key==='A')){ e.preventDefault(); selectAll(); return; }
+  if((e.metaKey||e.ctrlKey)) return;   // 他のショートカットは無視
+  if(e.key==='Tab'){ e.preventDefault(); focusBox=focusBox==='green'?'red':'green'; const b=B[focusBox]; b.c=b.a=b.v.length; drawEdit(); return; }
+  if(e.key==='Enter'){ e.preventDefault(); focusBox=focusBox==='green'?'red':'green'; const b=B[focusBox]; b.c=b.a=b.v.length; drawEdit(); return; }
+  if(e.key==='ArrowLeft'){ e.preventDefault(); moveCaret(-1,e.shiftKey); return; }
+  if(e.key==='ArrowRight'){ e.preventDefault(); moveCaret(1,e.shiftKey); return; }
+  if(e.key==='Home'){ e.preventDefault(); caretTo(0,e.shiftKey); return; }
+  if(e.key==='End'){ e.preventDefault(); caretTo(B[focusBox].v.length,e.shiftKey); return; }
+  if(e.key==='Backspace'){ e.preventDefault(); del(false); return; }
+  if(e.key==='Delete'){ e.preventDefault(); del(true); return; }
+  if(/^[a-zA-Z0-9]$/.test(e.key)){ e.preventDefault(); insert(e.key.toUpperCase()); }
+});
+
+/* ---- 起動 ---- */
+listScreen.style.transform='translateX('+VW+'px)'; listScreen.style.pointerEvents='none';
+drawEdit(); drawList();
+</script>
+</body>
+</html>

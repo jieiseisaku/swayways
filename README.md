@@ -18,25 +18,35 @@
 ### 更新サイクル
 ローカルで修正 → ダブルクリックで確認 → `git add -A && git commit -m "..." && git push`（GitHub Desktop でもOK）→ Pages に反映。
 
+## アナグラムエディタ（GUI）
+`editor.html` を**ダブルクリック**で起動（`EXIT` でゲーム `index.html` に戻る）。
+- **EDIT 画面**: 緑・赤の2語を入力 → `SAVE`（アナグラム成立かつ実在語のとき有効。CMD+ENTER 可）。`SWAP` で左右入替。`IMPORT SVG` は保存後に有効で、選んだ図を `green-red.svg` にリネームしてDL（`svg/` に置く）。
+- **LIST 画面**: 登録一覧。`EDIT(E)` / `SWAP(S)` / `DELETE(delete)`、並べ替え `NEW-OLD / A-Z / SHORT-LONG`（再クリックで逆順）。上下キーで選択。
+- **入出力**: `SAVE TO JS`（`quizzes.js` を書き出し）/ `EXPORT JSON` / `LOAD JSON`。書き出した `quizzes.js` で差し替えればゲームに反映。
+- 単語チェックは `words.js`（英単語リスト）を使用。エディタのみ読み込み（ゲーム本体は不使用）。
+
 ## 調整ポイント（テキストエディタで編集）
 - `config.js` … タイマー秒数 / ヒント（回数・秒・倍率・フォーカス）/ 矢印の幾何 / マーカー径 / 浮遊量 / 文字コリジョン / タイトル・ゲームの語。
-- `quizzes.js` … クイズ（アナグラム）の登録一覧。`window.QuizStore.export()/import()` でJSON入出力。
+- `quizzes.js` … クイズ登録（`id` / `green` / `red` / `hint` / `animation`）と図のパス解決（`window.QUIZ`）・入出力（`window.QuizStore`）。図SVGは `svg/` フォルダで管理。
 
 ## データ / アセット
-- `glyphs.js` … アルファベット字形（`alphabets.svg` から抽出した window.GLYPHS）。
+- `glyphs.js` … アルファベット字形（`alphabets.svg` から抽出した window.GLYPHS）。アンカーは `alphabets.svg` のピンク線（アセンダ/ディセンダ）の中央線を基準。ピンク線はフォントに含めない。
 - `texts.js` … UI単語の字形（`text.svg` から抽出：HINT / SWAY / WAYS / CLEAR / EXIT / START / READY?）。
-- `hint_step-pets*.svg` … ヒント/勝利イラスト（赤のみ / 緑のみ / 両方）。
+- `svg/hint_step-pets*.svg` … ヒント/勝利イラスト（赤のみ / 緑のみ / 両方）。図SVGはすべて `svg/` フォルダで管理。
+- `words.js` … 英単語リスト（エディタの単語チェック用）。
 
 ## 構成
 ```
 index.html     エントリ（盤面SVG＋各スクリプトを読み込み）
+editor.html    アナグラムエディタ（GUI。登録・編集・並べ替え・入出力）
 style.css      スタイル
 config.js      調整値（window.CONFIG）
-quizzes.js     クイズ登録＋JSON入出力（window.QUIZZES / QuizStore）
+quizzes.js     クイズ登録＋パス解決＋入出力（window.QUIZZES / QUIZ / QuizStore）
 glyphs.js      字形データ（window.GLYPHS）
 texts.js       UI単語データ（window.TEXTS）
+words.js       英単語リスト（エディタの単語チェック用）
 main.js        ゲーム本体（矢印エンジン・シーン・入力）
-hint_*.svg     ヒント/勝利イラスト
+svg/hint_*.svg ヒント/勝利イラスト
 ```
 すべて通常の `<script src>`（モジュール不使用）なので、サーバもビルドも不要です。
 

@@ -46,32 +46,61 @@ function glyphMetrics(ch){
   return _mc[ch]={xmin:b.x, ymin:b.y, ymax:b.y+b.height, w:b.width, h:b.height};
 }
 let CAPH=0;
-function textWidth(str,size){
-  const sc=size/CAPH; let w=0;
-  for(const ch of str){ if(ch===' '){ w+=size*0.45; continue; }
-    w += glyphMetrics(ch).w*sc + size*0.12; }
-  return w;
+const SPACE_W=0.45, SPACING=0.12;   // 比例詰め（光学カーニング）後の均一字間（cap比）
+// グリフ輪郭の左右プロファイル（baseline基準の y バンドごと min/max x）
+const _prof={};
+function glyphProfile(ch){
+  if(ch in _prof) return _prof[ch];
+  const gl=GLYPHS[ch]; if(!gl) return _prof[ch]=null;
+  const p=document.createElementNS(NS,'path'); p.setAttribute('d',gl.d); measure.appendChild(p);
+  let L=0; try{ L=p.getTotalLength(); }catch(e){}
+  const N=Math.max(80,Math.min(500,Math.round(L/2.5)||120));
+  const BH=CAPH/14, bands={}; let xmin=1e9,xmax=-1e9;
+  for(let i=0;i<=N;i++){ let pt; try{ pt=p.getPointAtLength(L*i/N); }catch(e){ break; }
+    const k=Math.round((pt.y-gl.b)/BH); const e=bands[k]||(bands[k]={mn:1e9,mx:-1e9});
+    if(pt.x<e.mn)e.mn=pt.x; if(pt.x>e.mx)e.mx=pt.x;
+    if(pt.x<xmin)xmin=pt.x; if(pt.x>xmax)xmax=pt.x; }
+  measure.removeChild(p);
+  if(xmax<xmin) return _prof[ch]=null;   // サンプル不可→カーニング無効でフォールバック
+  return _prof[ch]={bands,xmin,xmax};
 }
+function pairAdvance(a,b){   // a→b の送り（a.xmin→b.xmin、フォント単位）
+  const Sf=SPACING*CAPH; const pa=glyphProfile(a), pb=glyphProfile(b);
+  const aw=pa?(pa.xmax-pa.xmin):(glyphMetrics(a).w);
+  if(!pa||!pb) return aw+Sf;
+  let K=Infinity;
+  for(const k in pa.bands){ const e=pb.bands[k]; if(e){ const v=(pa.xmax-pa.bands[k].mx)+(e.mn-pb.xmin); if(v<K)K=v; } }
+  if(!isFinite(K)) K=0;
+  return aw+Sf-K;
+}
+function layoutPx(str,size){
+  const sc=size/CAPH, Sf=SPACING*CAPH, chars=[...str], pos=[0]; let cur=0;
+  for(let i=0;i<chars.length;i++){ const ch=chars[i], nx=chars[i+1];
+    const w = ch===' '? SPACE_W*size : (GLYPHS[ch]? glyphMetrics(ch).w*sc : 0.4*size);
+    let advc;
+    if(i===chars.length-1) advc=w;
+    else if(ch!==' '&&nx!==' '&&GLYPHS[ch]&&GLYPHS[nx]) advc=pairAdvance(ch,nx)*sc;
+    else advc=w+Sf*sc;
+    cur+=advc; pos.push(cur);
+  }
+  return {pos,w:cur,sc};
+}
+function textWidth(str,size){ return layoutPx(str,size).w; }
 // render `str` into `container` (cleared). align: 'left'|'center'|'right' around x. y = baseline.
 function setText(container, str, {x=0, y=0, size=30, color='#111', align='left', opacity=1}={}){
   container.innerHTML='';
-  const sc=size/CAPH;
-  const w=textWidth(str,size);
-  let cur = align==='center' ? x-w/2 : align==='right' ? x-w : x;
-  for(const ch of str){
-    if(ch===' '){ cur+=size*0.45; continue; }
-    const m=glyphMetrics(ch); const gl=GLYPHS[ch];
-    if(gl){
-      const path=document.createElementNS(NS,'path');
-      path.setAttribute('d', gl.d);
-      path.setAttribute('fill', color);
-      if(opacity!==1) path.setAttribute('opacity', opacity);
-      let ty = y - m.ymax*sc;
-      if(ch===':') ty -= size*0.18;          // nudge colon toward mid-line
-      path.setAttribute('transform', `translate(${cur - m.xmin*sc} ${ty}) scale(${sc})`);
-      container.appendChild(path);
+  const {pos,sc,w}=layoutPx(str,size);
+  const base = align==='center' ? x-w/2 : align==='right' ? x-w : x;
+  let i=0;
+  for(const ch of [...str]){
+    if(ch!==' '){ const m=glyphMetrics(ch), gl=GLYPHS[ch];
+      if(gl){ const path=document.createElementNS(NS,'path'); path.setAttribute('d', gl.d); path.setAttribute('fill', color);
+        if(opacity!==1) path.setAttribute('opacity', opacity);
+        const ty = y - (gl.b!=null? gl.b : m.ymax)*sc;
+        path.setAttribute('transform', `translate(${base+pos[i] - m.xmin*sc} ${ty}) scale(${sc})`);
+        container.appendChild(path); }
     }
-    cur += m.w*sc + size*0.12;
+    i++;
   }
   return w;
 }
@@ -272,7 +301,7 @@ function wordWidth(name,size){ const [,,bw,bh]=TEXTS[name].bbox; return bw*(size
 // place a single glyph horizontally centred at xc (for the monospace timer)
 function placeGlyphCentered(container, ch, xc, baseY, size, color){
   const gl=GLYPHS[ch]; if(!gl) return; const m=glyphMetrics(ch); const sc=size/CAPH;
-  let ty=baseY-m.ymax*sc; if(ch===':') ty-=size*0.18;
+  const ty=baseY-(gl.b!=null? gl.b : m.ymax)*sc;
   const tx=xc-(m.w*sc)/2-m.xmin*sc;
   const p=document.createElementNS(NS,'path'); p.setAttribute('d',gl.d); p.setAttribute('fill',color);
   p.setAttribute('transform',`translate(${tx} ${ty}) scale(${sc})`); container.appendChild(p);
@@ -495,10 +524,13 @@ const hintScale=document.getElementById('hintScale');
 const hintBar=document.getElementById('hintBar');
 const hintImg=document.getElementById('hintImg');
 const winImg=document.getElementById('winImg');
-const HINT_BASE=`hint_${GAME_G.toLowerCase()}-${GAME_R.toLowerCase()}`;   // hints are for the game puzzle
+// 図（ヒント/勝利イラスト）は登録クイズの hint から取得。SVGは svg/ フォルダ。
+const CUR_QUIZ=window.QUIZ.resolve(GAME_G,GAME_R);
+const HINT_NAME=CUR_QUIZ.hint||window.QUIZ.defaultHintName(CUR_QUIZ.id);   // hints are for the game puzzle
+const WIN_SRC=window.QUIZ.hintPath(HINT_NAME,'both');
 const XL='http://www.w3.org/1999/xlink';
 // win illustration: full (both colours)
-winImg.setAttribute('href',HINT_BASE+'.svg'); winImg.setAttributeNS(XL,'xlink:href',HINT_BASE+'.svg');
+winImg.setAttribute('href',WIN_SRC); winImg.setAttributeNS(XL,'xlink:href',WIN_SRC);
 // per-use hint config: 1st red@400%, 2nd green@400%, 3rd both@200%
 // random focus that keeps the zoom window over the colour's artwork (most of the screen = object)
 function hintFocus(variant){
@@ -510,7 +542,7 @@ function hintFocus(variant){
 function doHint(){
   if(hinting||hintUses<=0||won()) return;
   const variant = active || 'both';                       // hint matches the colour being built
-  const src = HINT_BASE + (variant==='both'?'':'_'+variant) + '.svg';
+  const src = window.QUIZ.hintPath(HINT_NAME, variant);
   const [fx,fy] = hintFocus(variant);
   hinting=true; paused=true;
   hintImg.setAttribute('href',src); hintImg.setAttributeNS(XL,'xlink:href',src);
@@ -584,8 +616,14 @@ function renderStartScreen(){
   startIndicator(document.getElementById('hudGreen'), GREEN, 'var(--green)', 'left');
   startIndicator(document.getElementById('hudRed'),   RED,   'var(--red)',   'right');
   renderStartButton();
+  renderTitleEdit();                   // 左上に EDIT（エディタへ）
   freeDrag=true;                       // title letters float & can be dragged
   requestAnimationFrame(floatLoop);
+}
+function renderTitleEdit(){
+  const c=document.getElementById('hudExit'); c.innerHTML='';
+  const w=setText(c,'EDIT',{x:34,y:52,size:26,color:'#999',align:'left'});
+  hitRect(c,28,26,w+12,36,()=>{ location.href='editor.html'; });
 }
 function renderStartButton(){
   const c=document.getElementById('hudStart'); c.innerHTML='';

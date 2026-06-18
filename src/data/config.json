@@ -1,0 +1,21 @@
+{
+  "titleWords": { "green": "SWAY", "red": "WAYS" },
+  "gameWords":  { "green": "STEP", "red": "PETS" },
+  "timerSeconds": 120,
+  "hintCount": 3,
+  "hintMs": 5000,
+  "hints": [
+    { "variant": "red",   "scale": 4, "focus": [1080, 360] },
+    { "variant": "green", "scale": 4, "focus": [1090, 530] },
+    { "variant": "both",  "scale": 2, "focus": [1050, 470] }
+  ],
+  "geom": {
+    "headH": 38.7, "headHalf": 38.75, "stroke": 13,
+    "gapR": 66, "laneM": 34, "bowK": 0.34,
+    "headHead": 72, "headShaft": 36, "shaftBack": 0.85
+  },
+  "marker": { "circlePx": 16, "diamondPx": 18, "offsetY": 20 },
+  "letterCollision": 1.25,
+  "floatAmpMin": 5,
+  "floatAmpMax": 10
+}

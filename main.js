@@ -210,25 +210,35 @@ function computeGeo(){
   }
   geo.forEach(o=>{ o.tan=norm(o.tip[0]-o.mx,o.tip[1]-o.my); a2g.set(o.a,o); });
 }
-const OUT=config.geom.outline;
-function arrowSVG(o, container, solid){
-  const ex=o.tip[0]-o.tan[0]*HEAD_H*BACK, ey=o.tip[1]-o.tan[1]*HEAD_H*BACK;
-  const d=o.a.color==='green'?`M ${o.start[0]} ${o.start[1]} L ${ex} ${ey}`
-                             :`M ${o.start[0]} ${o.start[1]} Q ${o.mx} ${o.my} ${ex} ${ey}`;
-  const deg=Math.atan2(o.tan[1],o.tan[0])*180/Math.PI;
-  const col=o.a.color==='red'?'var(--red)':'var(--green)';
-  const mk=(t,attrs)=>{const e=document.createElementNS(NS,t);for(const k in attrs)e.setAttribute(k,attrs[k]);container.appendChild(e);return e;};
-  if(solid){
-    // word complete -> solid fill
-    mk('path',{d, fill:'none', stroke:col, 'stroke-width':config.geom.stroke, 'stroke-linecap':'butt'});
-    mk('polygon',{points:HEAD_PTS, fill:col, transform:`translate(${o.tip[0]} ${o.tip[1]}) rotate(${deg})`});
-  } else {
-    // building -> hollow outline (same silhouette, OUT-px contour, white interior)
-    mk('path',{d, fill:'none', stroke:col, 'stroke-width':config.geom.stroke, 'stroke-linecap':'butt'});
-    mk('path',{d, fill:'none', stroke:'#fff', 'stroke-width':config.geom.stroke-2*OUT, 'stroke-linecap':'butt'});
-    mk('polygon',{points:HEAD_PTS, fill:'#fff', stroke:col, 'stroke-width':OUT, 'stroke-linejoin':'miter',
-                  transform:`translate(${o.tip[0]} ${o.tip[1]}) rotate(${deg})`});
+// the merged arrow silhouette (shaft + head as one closed shape) -> a single path
+function arrowSilhouette(o){
+  const halfBar=config.geom.stroke/2, HB=HEAD_HALF;
+  const S=o.start, C=[o.mx,o.my], TIP=o.tip, tan=o.tan;
+  const base=[TIP[0]-tan[0]*HEAD_H, TIP[1]-tan[1]*HEAD_H];   // head back
+  const perpT=[-tan[1],tan[0]];
+  const N=20, top=[], bot=[];
+  for(let i=0;i<=N;i++){ const t=i/N, u=1-t;
+    const qx=u*u*S[0]+2*u*t*C[0]+t*t*base[0], qy=u*u*S[1]+2*u*t*C[1]+t*t*base[1];
+    const dx=2*u*(C[0]-S[0])+2*t*(base[0]-C[0]), dy=2*u*(C[1]-S[1])+2*t*(base[1]-C[1]);
+    const dl=Math.hypot(dx,dy)||1, nx=-dy/dl, ny=dx/dl;
+    top.push([qx+nx*halfBar, qy+ny*halfBar]); bot.push([qx-nx*halfBar, qy-ny*halfBar]);
   }
+  let d='M '+top[0][0]+' '+top[0][1];
+  for(let i=1;i<=N;i++) d+=' L '+top[i][0]+' '+top[i][1];
+  d+=` L ${base[0]+perpT[0]*HB} ${base[1]+perpT[1]*HB}`;     // top barb
+  d+=` L ${TIP[0]} ${TIP[1]}`;                               // tip
+  d+=` L ${base[0]-perpT[0]*HB} ${base[1]-perpT[1]*HB}`;     // bottom barb
+  for(let i=N;i>=0;i--) d+=' L '+bot[i][0]+' '+bot[i][1];
+  return d+' Z';
+}
+function arrowSVG(o, container, solid){
+  const col=o.a.color==='red'?'var(--red)':'var(--green)';
+  const p=document.createElementNS(NS,'path');
+  p.setAttribute('d', arrowSilhouette(o));
+  if(solid){ p.setAttribute('fill',col); p.setAttribute('stroke','none'); }          // complete -> solid
+  else { p.setAttribute('fill','none'); p.setAttribute('stroke',col);                // building -> hollow outline
+         p.setAttribute('stroke-width',config.geom.outline); p.setAttribute('stroke-linejoin','miter'); }
+  container.appendChild(p);
 }
 
 // ---- game state ----

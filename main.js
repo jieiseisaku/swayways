@@ -1,8 +1,5 @@
-import './style.css';
-import config from './data/config.json';
-import quizzes from './data/quizzes.json';
-import GLYPHS from './data/glyphs.json';
-import TEXTS from './data/texts.json';
+// SWAY WAYS — game logic (classic script; reads window.CONFIG / QUIZZES / GLYPHS / TEXTS)
+const config=window.CONFIG, quizzes=window.QUIZZES, GLYPHS=window.GLYPHS, TEXTS=window.TEXTS;
 const NS='http://www.w3.org/2000/svg';
 
 // ---- geometry constants (same as the tool) ----

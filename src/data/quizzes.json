@@ -1,6 +1,0 @@
-[
-  { "id": "step-pets",     "green": "STEP",   "red": "PETS"   },
-  { "id": "listen-silent", "green": "LISTEN", "red": "SILENT" },
-  { "id": "night-thing",   "green": "NIGHT",  "red": "THING"  },
-  { "id": "earth-heart",   "green": "EARTH",  "red": "HEART"  }
-]

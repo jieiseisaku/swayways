@@ -135,13 +135,20 @@ function placeLetters(){
 // ---- start markers ----
 // marker rides the chain head; when a word is complete it returns to its initial letter
 let markers=[];
-function markerLetterId(color){ const ch=chains[color]; return isComplete(color)? ch.word[0] : ch.word[ch.prog]; }
+let active=null;   // committed colour while building one word (null = choosable)
+function markerInfo(color){
+  if(isComplete(color)) return { show:true, id:chains[color].word[0] };                 // done -> 1st letter
+  if(!started)          return { show:true, id:chains[color].word[0] };                 // title screen
+  if(active===null || active===color)
+                        return { show:true, id:chains[color].word[chains[color].prog] }; // choosable / active head
+  return { show:false };                                                                // other colour is locked
+}
 function placeMarkers(){
   gMarkers.innerHTML=''; markers=[];
-  const gId=markerLetterId('green'), rId=markerLetterId('red');
-  const same = (gId===rId);
-  addMarker('green', gId, same?-15:0);   // green diamond (16px)
-  addMarker('red',   rId, same?+15:0);   // red circle (16px)
+  const g=markerInfo('green'), r=markerInfo('red');
+  const same = g.show && r.show && g.id===r.id;
+  if(g.show) addMarker('green', g.id, same?-15:0);   // green diamond
+  if(r.show) addMarker('red',   r.id, same?+15:0);   // red circle
 }
 function addMarker(color, id, dx){
   const n=nodeEls[id]; if(!n) return;
@@ -203,17 +210,25 @@ function computeGeo(){
   }
   geo.forEach(o=>{ o.tan=norm(o.tip[0]-o.mx,o.tip[1]-o.my); a2g.set(o.a,o); });
 }
-function arrowSVG(o, container){
+const OUT=config.geom.outline;
+function arrowSVG(o, container, solid){
   const ex=o.tip[0]-o.tan[0]*HEAD_H*BACK, ey=o.tip[1]-o.tan[1]*HEAD_H*BACK;
   const d=o.a.color==='green'?`M ${o.start[0]} ${o.start[1]} L ${ex} ${ey}`
                              :`M ${o.start[0]} ${o.start[1]} Q ${o.mx} ${o.my} ${ex} ${ey}`;
   const deg=Math.atan2(o.tan[1],o.tan[0])*180/Math.PI;
-  const shaft=document.createElementNS(NS,'path');
-  shaft.setAttribute('class',o.a.color+'-shaft'); shaft.setAttribute('d',d);
-  const head=document.createElementNS(NS,'polygon');
-  head.setAttribute('class',o.a.color+'-head'); head.setAttribute('points',HEAD_PTS);
-  head.setAttribute('transform',`translate(${o.tip[0]} ${o.tip[1]}) rotate(${deg})`);
-  container.appendChild(shaft); container.appendChild(head);
+  const col=o.a.color==='red'?'var(--red)':'var(--green)';
+  const mk=(t,attrs)=>{const e=document.createElementNS(NS,t);for(const k in attrs)e.setAttribute(k,attrs[k]);container.appendChild(e);return e;};
+  if(solid){
+    // word complete -> solid fill
+    mk('path',{d, fill:'none', stroke:col, 'stroke-width':config.geom.stroke, 'stroke-linecap':'butt'});
+    mk('polygon',{points:HEAD_PTS, fill:col, transform:`translate(${o.tip[0]} ${o.tip[1]}) rotate(${deg})`});
+  } else {
+    // building -> hollow outline (same silhouette, OUT-px contour, white interior)
+    mk('path',{d, fill:'none', stroke:col, 'stroke-width':config.geom.stroke, 'stroke-linecap':'butt'});
+    mk('path',{d, fill:'none', stroke:'#fff', 'stroke-width':config.geom.stroke-2*OUT, 'stroke-linecap':'butt'});
+    mk('polygon',{points:HEAD_PTS, fill:'#fff', stroke:col, 'stroke-width':OUT, 'stroke-linejoin':'miter',
+                  transform:`translate(${o.tip[0]} ${o.tip[1]}) rotate(${deg})`});
+  }
 }
 
 // ---- game state ----
@@ -221,11 +236,12 @@ const isComplete=c=>chains[c].prog>=chains[c].arrows.length;
 const won=()=>isComplete('green')&&isComplete('red');
 function drawSolved(){
   gArrowsLive.innerHTML='';
-  ['green','red'].forEach(c=>{ for(let i=0;i<chains[c].prog;i++) arrowSVG(a2g.get(chains[c].arrows[i]), gArrowsLive); });
+  ['green','red'].forEach(c=>{ const solid=isComplete(c);   // complete word = solid, building = outline
+    for(let i=0;i<chains[c].prog;i++) arrowSVG(a2g.get(chains[c].arrows[i]), gArrowsLive, solid); });
 }
-function drawAllArrows(){   // title logo: the whole solved diagram
+function drawAllArrows(){   // title logo: the whole diagram, solid
   gArrowsLive.innerHTML='';
-  allArrows.forEach(a=> arrowSVG(a2g.get(a), gArrowsLive));
+  allArrows.forEach(a=> arrowSVG(a2g.get(a), gArrowsLive, true));
 }
 
 /* =======================================================================
@@ -331,8 +347,13 @@ function letterAt(p){ let best=null,bd=1e9;
   for(const id in nodeEls){ const n=nodeEls[id]; const d=Math.hypot(p[0]-n.cx,p[1]-n.cy);
     if(d<n.rad && d<bd){ bd=d; best=id; } } return best; }
 let drag=null, moveDrag=null, cleared=false, freeDrag=false;
-function candidatesFor(id){ const out=[];
-  ['green','red'].forEach(c=>{ if(!isComplete(c)&&chains[c].word[chains[c].prog]===id) out.push(c); }); return out; }
+function candidatesFor(id){
+  if(active!==null)   // already building one colour: only that colour is connectable
+    return (!isComplete(active) && chains[active].word[chains[active].prog]===id) ? [active] : [];
+  const out=[];
+  ['green','red'].forEach(c=>{ if(!isComplete(c)&&chains[c].word[chains[c].prog]===id) out.push(c); });
+  return out;
+}
 // after CLEAR the letters drift; dragging just updates the base position (floatLoop renders)
 function moveLetterTo(p){
   const id=moveDrag.id;
@@ -396,7 +417,10 @@ function onUp(ev){
   drag=null; clearOutlines();
 }
 function correct(color,targetId){
-  chains[color].prog++; drawSolved(); renderIndicators(); placeMarkers();   // marker rides to the new head
+  if(active===null) active=color;          // first connection commits to this colour (other marker hides)
+  chains[color].prog++;
+  if(isComplete(color)) active=null;        // word done -> release; other colour's marker revives
+  drawSolved(); renderIndicators(); placeMarkers();
   const path=nodeEls[targetId].path; path.classList.remove('pop'); void path.getBBox(); path.classList.add('pop');
   if(won()) onWin();
 }
@@ -433,13 +457,21 @@ const XL='http://www.w3.org/1999/xlink';
 // win illustration: full (both colours)
 winImg.setAttribute('href',HINT_BASE+'.svg'); winImg.setAttributeNS(XL,'xlink:href',HINT_BASE+'.svg');
 // per-use hint config: 1st red@400%, 2nd green@400%, 3rd both@200%
-const HINT_CFG=config.hints.map(hc=>({ src:HINT_BASE+(hc.variant==='both'?'':'_'+hc.variant)+'.svg', scale:hc.scale, focus:hc.focus }));
+// random focus that keeps the zoom window over the colour's artwork (most of the screen = object)
+function hintFocus(variant){
+  const b=config.hintBox[variant]||config.hintBox.both;
+  const wW=VW/config.hintScale, wH=VH/config.hintScale;
+  const rx=Math.max(0,(b[2]-wW)/2), ry=Math.max(0,(b[3]-wH)/2);
+  return [ b[0]+b[2]/2 + (Math.random()*2-1)*rx, b[1]+b[3]/2 + (Math.random()*2-1)*ry ];
+}
 function doHint(){
   if(hinting||hintUses<=0||won()) return;
-  const cfg=HINT_CFG[3-hintUses];
+  const variant = active || 'both';                       // hint matches the colour being built
+  const src = HINT_BASE + (variant==='both'?'':'_'+variant) + '.svg';
+  const [fx,fy] = hintFocus(variant);
   hinting=true; paused=true;
-  hintImg.setAttribute('href',cfg.src); hintImg.setAttributeNS(XL,'xlink:href',cfg.src);
-  hintScale.setAttribute('transform',`translate(${CX} ${CY}) scale(${cfg.scale}) translate(${-cfg.focus[0]} ${-cfg.focus[1]})`);
+  hintImg.setAttribute('href',src); hintImg.setAttributeNS(XL,'xlink:href',src);
+  hintScale.setAttribute('transform',`translate(${CX} ${CY}) scale(${config.hintScale}) translate(${-fx} ${-fy})`);
   hintScreen.style.display='';
   hintBar.style.display=''; hintBar.setAttribute('width',0);
   const HINT_MS=config.hintMs;
@@ -536,7 +568,7 @@ function renderStartButton(){
 }
 function startGame(){
   if(started) return;
-  started=true; freeDrag=false;                       // stop the title float/drag
+  started=true; freeDrag=false; active=null;           // stop the title float/drag; colour not yet chosen
   document.getElementById('hudStart').innerHTML='';   // remove READY? button
   document.getElementById('hudGreen').innerHTML=''; document.getElementById('hudRed').innerHTML='';
   // switch to the actual puzzle (STEP / PETS) with a fresh random layout

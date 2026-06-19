@@ -20,8 +20,7 @@
   .bounce{ animation:bounce .1s ease; }
   .row{ transition:transform .1s ease-out; }
   .listbtn{ transition:transform .1s ease-out; }
-  /* 画面スライド（400ms イーズアウト） */
-  #listScreen{ transition:transform .4s ease-out; }
+  /* スライドは JS 側で都度 transition を設定（起動時の誤作動を防ぐため CSS 既定は付けない） */
 </style>
 </head>
 <body>
@@ -71,7 +70,7 @@ const SPACE=0.45;
 const _L=window.LAYOUT, TYPO=_L.typography, MO=_L.motion;
 const EE=_L.screens.editEdit.elements, EL2=_L.screens.editList.elements;
 let SPACING=TYPO.spacing;       // 比例詰め後の均一字間（cap比）。追加要素描画時に一時上書き。
-const SYNTH={'-':0.5,'.':0.32,'"':0.42};
+const SYNTH={'-':0.5,'.':0.32,'"':0.42,'*':0.55};
 const EM=CAP*EMK;
 function Sf(){ return SPACING*CAP; }   // 字間（フォント単位）
 
@@ -124,6 +123,9 @@ function drawSynth(g,ch,cur,size,col){
   if(ch==='-'){ add(cur+size*0.06, -size*0.40, size*0.38, size*0.11); }
   else if(ch==='.'){ add(cur+size*0.02, -size*0.13, size*0.13, size*0.13); }
   else if(ch==='"'){ add(cur+size*0.04, -size*0.95, size*0.07, size*0.26); add(cur+size*0.22, -size*0.95, size*0.07, size*0.26); }
+  else if(ch==='*'){ const cx=cur+size*0.27, cy=-size*0.62, r=size*0.26;
+    const ln=(x1,y1,x2,y2)=>{ const l=document.createElementNS(NS,'line');l.setAttribute('x1',x1);l.setAttribute('y1',y1);l.setAttribute('x2',x2);l.setAttribute('y2',y2);l.setAttribute('stroke',col);l.setAttribute('stroke-width',size*0.09);l.setAttribute('stroke-linecap','round');g.appendChild(l); };
+    ln(cx,cy-r,cx,cy+r); ln(cx-r*0.87,cy-r*0.5,cx+r*0.87,cy+r*0.5); ln(cx-r*0.87,cy+r*0.5,cx+r*0.87,cy-r*0.5); }
 }
 // str を <g> に積む。原点 = 左端・baseline。color は配列可。_pos[]=各キャレットx
 function buildText(str, size, color){
@@ -187,11 +189,16 @@ function placeArrow(container, x, baseY, size, dir, color){
    データ（作業用リスト。QUIZZES の複製）
    ord 大きいほど新しい＝上に表示。配列先頭を一番上にする。
    ========================================================================= */
-let LIST=(function(){ const s=(window.QUIZZES||[]); return s.map((q,i)=>({ id:q.id, green:q.green, red:q.red, hint:q.hint||'', animation:q.animation||'', ord:s.length-1-i })); })();
+let LIST=(function(){ const s=(window.QUIZZES||[]); return s.map((q,i)=>({ id:q.id, green:q.green, red:q.red, hint:window.QUIZ.defaultHintName(q.id), animation:window.QUIZ.defaultAnimName(q.id), ord:s.length-1-i })); })();
 let ordSeq=LIST.length;
 function strip(){ return LIST.slice().sort((a,b)=>b.ord-a.ord).map(q=>({id:q.id,green:q.green,red:q.red,hint:q.hint||'',animation:q.animation||''})); }
-// 変更を quizzes.js に反映（ダウンロード）
-function commit(){ window.QuizStore.exportJS(strip()); }
+// ---- 保存モデル：編集はメモリのみ（dirty）。SAVE で quizzes.js に書き出す。----
+let dirty=false;
+function setTitleDirty(){ document.title=(dirty?'*':'')+'ANAGRAM EDITOR — SWAY WAYS'; }
+function markDirty(){ dirty=true; setTitleDirty(); }
+function refreshScreen(){ if(listOpen) drawList(); else drawEdit(); }
+function saveFile(){ window.QuizStore.exportJS(strip()); dirty=false; setTitleDirty(); refreshScreen(); }
+window.addEventListener('beforeunload', e=>{ if(dirty){ e.preventDefault(); e.returnValue=''; } });
 
 /* =========================================================================
    EDIT 画面の状態（テキスト編集：caret/anchor、選択対応）
@@ -255,7 +262,7 @@ function renderExtras(screenKey, container){
 function drawEdit(){
   editScreen.innerHTML='';
   const bg=document.createElementNS(NS,'rect'); bg.setAttribute('width',VW); bg.setAttribute('height',VH); bg.setAttribute('fill','#fff'); editScreen.appendChild(bg);
-  place(editScreen,EE.title.text,{x:EE.title.x,y:EE.title.y,size:EE.title.size,color:EE.title.color,align:EE.title.align});
+  place(editScreen,(dirty?'*':'')+EE.title.text,{x:EE.title.x,y:EE.title.y,size:EE.title.size,color:EE.title.color,align:EE.title.align});
   place(editScreen,EE.exit.text,{x:EE.exit.x,y:EE.exit.y,size:EE.exit.size,color:EE.exit.color,align:EE.exit.align}).classList.add('clk');
   hit(editScreen,EE.exit.x-15,EE.exit.y-34,150,55,()=>{ location.href='index.html'; },'clk');
 
@@ -294,9 +301,18 @@ function drawEdit(){
   rrect(impG,ix,iy,I.w,I.h,I.h/2,icol,'#fff');
   place(impG,I.text,{x:I.x,y:I.y+I.size*0.30,size:I.size,color:icol,align:'center'});
   if(saved){
-    const fname=(editingId||window.QUIZ.makeId(gv(),rv()))+'.svg';
+    const fname=window.QUIZ.defaultHintName(editingId||window.QUIZ.makeId(gv(),rv()));
     place(editScreen,'RENAME AS - '+fname.toUpperCase(),{x:I.x,y:I.y+I.h*0.86,size:20,color:COL.gray,align:'center'});
     hit(editScreen,ix,iy,I.w,I.h,()=>document.getElementById('svgPicker').click(),'clk');
+  }
+
+  // SAVE（ファイル保存：quizzes.js を書き出し）。未保存があるときだけ濃く。
+  const SF=EE.saveFile; if(SF){ const fx=SF.x-SF.w/2, fy=SF.y-SF.h/2;
+    const sg=document.createElementNS(NS,'g'); editScreen.appendChild(sg);
+    const fcol=dirty?COL.ink:COL.gray;
+    rrect(sg,fx,fy,SF.w,SF.h,SF.h/2,fcol,'#fff');
+    place(sg,SF.text,{x:SF.x,y:SF.y+SF.size*0.30,size:SF.size,color:fcol,align:'center'});
+    hit(editScreen,fx,fy,SF.w,SF.h,saveFile,'clk');
   }
   renderExtras('editEdit', editScreen);
 }
@@ -345,22 +361,22 @@ function doSave(){
   const v=validity();
   if(!v.ok){ saveMsg='FAILED'; shakeBox=!v.red?'red':(!v.green?'green':'red'); drawEdit(); setTimeout(()=>{shakeBox=null;},450); return; }
   const g=clean(gv()), r=clean(rv()); const id=window.QUIZ.makeId(g,r);
-  const item={ id, green:g, red:r, hint:'', animation:'' };
+  // hint/animation は id から自動命名（"hint_[id].svg" / "anim_[id].json"）
+  const item={ id, green:g, red:r, hint:window.QUIZ.defaultHintName(id), animation:window.QUIZ.defaultAnimName(id) };
   let idx=LIST.findIndex(q=>q.id===(editingId||id));
-  if(idx>=0){ item.hint=LIST[idx].hint; item.animation=LIST[idx].animation; item.ord=LIST[idx].ord; LIST[idx]=item; }
+  if(idx>=0){ item.ord=LIST[idx].ord; LIST[idx]=item; }
   else { item.ord=ordSeq++; LIST.unshift(item); }
-  editingId=id; saved=true; saveMsg='SUCCESS!'; shakeBox=null; drawEdit();
-  commit();   // quizzes.js に反映
+  editingId=id; saved=true; saveMsg='SUCCESS!'; shakeBox=null; markDirty(); drawEdit();   // メモリ登録＝未保存
 }
 
 document.getElementById('svgPicker').addEventListener('change',e=>{
   const f=e.target.files[0]; if(!f) return;
-  const id=editingId||window.QUIZ.makeId(gv(),rv()); const newName=id+'.svg';
+  const id=editingId||window.QUIZ.makeId(gv(),rv()); const newName=window.QUIZ.defaultHintName(id);
   const r=new FileReader();
   r.onload=()=>{ const b=new Blob([r.result],{type:'image/svg+xml'});
     const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=newName;
     document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
-    const i=LIST.findIndex(q=>q.id===id); if(i>=0){ LIST[i].hint=newName; commit(); }
+    const i=LIST.findIndex(q=>q.id===id); if(i>=0){ LIST[i].hint=newName; markDirty(); }
     saveMsg='SAVED: '+newName; drawEdit();
     alert('「'+newName+'」をダウンロードしました。svg/ フォルダに入れてください。');
   };
@@ -440,6 +456,9 @@ function drawList(){
     const t=place(listScreen,label,{x:SO.x,y:SO.y+i*(SO.gap||54),size:SO.size,color:deleteMode?COL.gray:(active?COL.ink:COL.gray)});
     if(!deleteMode){ t.classList.add('clk'); hit(listScreen,SO.x-5,SO.y+i*(SO.gap||54)-SO.size,300,40,()=>{ if(sortMode===s[0]) sortRev=!sortRev; else {sortMode=s[0];sortRev=false;} drawList(); },'clk'); }
   });
+  // SAVE（ファイル保存・矩形なし）。DELETE の下。
+  const SF=EL2.saveFile; if(SF && !deleteMode){ const sfg=place(listScreen,SF.text,{x:SF.x,y:SF.y,size:SF.size,color:dirty?COL.ink:COL.gray}); sfg.classList.add('clk');
+    hit(listScreen,SF.x-5,SF.y-SF.size,320,ROW,saveFile,'clk'); }
   renderExtras('editList', listScreen);
 }
 function drawEntry(row,q,y,colored,dim){
@@ -482,18 +501,21 @@ function doEditSelected(){ const q=LIST.find(x=>x.id===selId); if(!q) return;
   editingId=q.id; focusBox='green'; saved=false; saveMsg=''; shakeBox=null; drawEdit(); closeList();
 }
 function doSwapSelected(){ const q=LIST.find(x=>x.id===selId); if(!q) return;
-  const t=q.green; q.green=q.red; q.red=t; q.id=window.QUIZ.makeId(q.green,q.red); selId=q.id; drawList(); commit();
+  const t=q.green; q.green=q.red; q.red=t; q.id=window.QUIZ.makeId(q.green,q.red);
+  q.hint=window.QUIZ.defaultHintName(q.id); q.animation=window.QUIZ.defaultAnimName(q.id);
+  selId=q.id; markDirty(); drawList();
 }
 function enterDelete(){ deleteMode=true; drawList(); }
 function exitDelete(){ deleteMode=false; drawList(); }
 function confirmDelete(){ const i=LIST.findIndex(q=>q.id===selId); if(i<0){ exitDelete(); return; }
-  LIST.splice(i,1); deleteMode=false; const a=sortedList(); selId=a.length?a[0].id:null; drawList(); commit();
+  LIST.splice(i,1); deleteMode=false; const a=sortedList(); selId=a.length?a[0].id:null; markDirty(); drawList();
 }
 
 /* =========================================================================
    キーボード
    ========================================================================= */
 window.addEventListener('keydown',e=>{
+  if((e.metaKey||e.ctrlKey) && (e.key==='s'||e.key==='S')){ e.preventDefault(); saveFile(); return; }   // ⌘S でファイル保存
   if(listOpen){
     if(deleteMode){ if(e.key==='Escape') exitDelete(); return; }
     const a=sortedList(); const i=a.findIndex(q=>q.id===selId);
@@ -521,8 +543,8 @@ window.addEventListener('keydown',e=>{
 });
 
 /* ---- 起動 ---- */
-listScreen.style.transform='translateX('+VW+'px)'; listScreen.style.pointerEvents='none';
-drawEdit(); drawList();
+listScreen.style.transition='none'; listScreen.style.transform='translateX('+VW+'px)'; listScreen.style.pointerEvents='none';
+setTitleDirty(); drawEdit(); drawList();
 </script>
 </body>
 </html>

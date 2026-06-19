@@ -25,6 +25,17 @@
 - **入出力**: `SAVE TO JS`（`quizzes.js` を書き出し）/ `EXPORT JSON` / `LOAD JSON`。書き出した `quizzes.js` で差し替えればゲームに反映。
 - 単語チェックは `words.js`（英単語リスト）を使用。エディタのみ読み込み（ゲーム本体は不使用）。
 
+## レイアウトエディタ（GUI）
+`layout-editor.html` を**ダブルクリック**で起動。Unity/GameMaker/Figma 風に、配置・文字組み・モーションを画面で調整。
+- 上部: 画面タブ、`↶Undo / ↷Redo`（履歴50・Cmd/Ctrl+Z、Shift+Zで戻る/進む）、`▶ Preview`、`⤓ Export layout.js`。
+- `▶ Preview`: 編集中の値で実ページ（index.html / editor.html）を読み込み、hover・クリック・スライド等の実挙動を確認（編集不可）。もう一度押すと編集に戻る。
+- 数値入力は Enter / フォーカス外で確定。色はピッカーを閉じた（色域外クリック）ときに確定。
+- 画面タブ: ゲーム（Title / Playing / Hint / Clear / Over）＋ エディタ（Editor-EDIT / Editor-LIST）の全シーケンス。プレイ中の下部UI（進捗 SWAY/WAYS・タイマー・下線）も配置可能。
+- 中央: 1920×1080 ステージ内に 1456×819 フレーム。要素をドラッグ（矢印キーで1px / Shift+10px）。
+- 左: 要素一覧。右: 選択要素のプロパティ（x/y/size/color/align/text/w/h）＋ Typography（字間・行間）＋ Motion（slide ms・ease・hover）。
+- 調整したら `Export layout.js` → ダウンロードした `layout.js` をプロジェクトに差し替え → index/editor に反映。
+- 値は `layout.js`（`window.LAYOUT`）が単一ソース。index.html(ゲーム) と editor.html がこれを読む。
+
 ## 調整ポイント（テキストエディタで編集）
 - `config.js` … タイマー秒数 / ヒント（回数・秒・倍率・フォーカス）/ 矢印の幾何 / マーカー径 / 浮遊量 / 文字コリジョン / タイトル・ゲームの語。
 - `quizzes.js` … クイズ登録（`id` / `green` / `red` / `hint` / `animation`）と図のパス解決（`window.QUIZ`）・入出力（`window.QuizStore`）。図SVGは `svg/` フォルダで管理。
@@ -37,10 +48,12 @@
 
 ## 構成
 ```
-index.html     エントリ（盤面SVG＋各スクリプトを読み込み）
-editor.html    アナグラムエディタ（GUI。登録・編集・並べ替え・入出力）
-style.css      スタイル
-config.js      調整値（window.CONFIG）
+index.html        エントリ（盤面SVG＋各スクリプトを読み込み）
+editor.html       アナグラムエディタ（GUI。登録・編集・並べ替え・入出力）
+layout-editor.html レイアウトエディタ（配置/文字組み/モーションをGUI調整→layout.js書き出し）
+layout.js         配置/モーション/タイポの単一ソース（window.LAYOUT）
+style.css         スタイル
+config.js         調整値（window.CONFIG）
 quizzes.js     クイズ登録＋パス解決＋入出力（window.QUIZZES / QUIZ / QuizStore）
 glyphs.js      字形データ（window.GLYPHS）
 texts.js       UI単語データ（window.TEXTS）

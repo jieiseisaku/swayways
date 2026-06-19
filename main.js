@@ -15,6 +15,14 @@ const params=new URLSearchParams(location.search);
 const GAME_G=clean(params.get('g'))||config.gameWords.green;   // the puzzle that begins on READY?
 const GAME_R=clean(params.get('r'))||config.gameWords.red;
 const TITLE_G=config.titleWords.green, TITLE_R=config.titleWords.red;          // title-screen logo words
+// layout.js（GUIで編集する各シーンの配置）。未設定なら def にフォールバック。
+function LZ(screen,key,def){ try{ const e=window.LAYOUT.screens[screen].elements[key]; return e? Object.assign({},def,e) : def; }catch(_){ return def; } }
+function setLines(screen){
+  const L=LZ(screen,'lineL',{x:210,y:776,w:418}), R=LZ(screen,'lineR',{x:828,y:776,w:418});
+  const ll=document.getElementById('lineL'), lr=document.getElementById('lineR');
+  if(ll){ ll.setAttribute('x1',L.x); ll.setAttribute('x2',L.x+L.w); ll.setAttribute('y1',L.y); ll.setAttribute('y2',L.y); }
+  if(lr){ lr.setAttribute('x1',R.x); lr.setAttribute('x2',R.x+R.w); lr.setAttribute('y1',R.y); lr.setAttribute('y2',R.y); }
+}
 // current model (rebuilt when switching between title and game)
 let GREEN, RED, greenArrows, redArrows, allArrows, chains;
 function setWords(g,r){
@@ -46,7 +54,8 @@ function glyphMetrics(ch){
   return _mc[ch]={xmin:b.x, ymin:b.y, ymax:b.y+b.height, w:b.width, h:b.height};
 }
 let CAPH=0;
-const SPACE_W=0.45, SPACING=0.12;   // 比例詰め（光学カーニング）後の均一字間（cap比）
+const SPACE_W=0.45;
+const SPACING=(window.LAYOUT&&window.LAYOUT.typography&&window.LAYOUT.typography.spacing)||0.12;   // 比例詰め後の均一字間（cap比）
 // グリフ輪郭の左右プロファイル（baseline基準の y バンドごと min/max x）
 const _prof={};
 function glyphProfile(ch){
@@ -310,11 +319,12 @@ let maxDigitW=0;
 
 function renderIndicators(){
   const fmt=(word,prog)=> word.split('').map((ch,i)=> i<=prog?ch:'?').join('');
-  const gw=setText(document.getElementById('hudGreen'), fmt(GREEN,chains.green.prog), {x:34,y:790,size:30,color:'var(--green)',align:'left'});
-  const rw=setText(document.getElementById('hudRed'),   fmt(RED,chains.red.prog),     {x:1422,y:790,size:30,color:'var(--red)',align:'right'});
+  const G_=LZ('play','indGreen',{x:34,y:790,size:30}), R_=LZ('play','indRed',{x:1422,y:790,size:30});
+  const gw=setText(document.getElementById('hudGreen'), fmt(GREEN,chains.green.prog), {x:G_.x,y:G_.y,size:G_.size,color:'var(--green)',align:'left'});
+  const rw=setText(document.getElementById('hudRed'),   fmt(RED,chains.red.prog),     {x:R_.x,y:R_.y,size:R_.size,color:'var(--red)',align:'right'});
   // after CLEAR, the word labels also sort the letters
-  indHit(document.getElementById('hudGreen'), 30, 754, gw+8, 56, 'green');
-  indHit(document.getElementById('hudRed'),   1422-rw-4, 754, rw+8, 56, 'red');
+  indHit(document.getElementById('hudGreen'), G_.x-4, G_.y-36, gw+8, 56, 'green');
+  indHit(document.getElementById('hudRed'),   R_.x-rw-4, R_.y-36, rw+8, 56, 'red');
 }
 function indHit(container, x, y, w, h, color){
   const r=document.createElementNS(NS,'rect');
@@ -325,27 +335,27 @@ function indHit(container, x, y, w, h, color){
 let blink=true;
 function renderTimer(){
   const el=document.getElementById('hudTimer'); el.innerHTML='';
-  if(won()){ placeWord(el,'CLEAR',{x:CX,y:794,size:42,color:'#111',align:'center'}); return; }
+  if(won()){ const CL=LZ('clear','clearText',{x:CX,y:794,size:42}); placeWord(el,'CLEAR',{x:CL.x,y:CL.y,size:CL.size,color:'#111',align:'center'}); return; }
   // monospace cells: [d][d] : [d][d] — colon slot kept even while blinked off
-  const size=40, sc=size/CAPH;
+  const T=LZ('play','timer',{x:CX,y:790,size:40}); const size=T.size, sc=size/CAPH;
   const DW=maxDigitW*sc + size*0.10;   // digit cell advance (fixed)
   const CW=size*0.34;                  // colon cell advance (fixed)
   const m=String(Math.floor(timeLeft/60)).padStart(2,'0'), s=String(timeLeft%60).padStart(2,'0');
   const cells=[m[0],m[1],':',s[0],s[1]];
   const widths=cells.map(c=> c===':'?CW:DW);
   const total=widths.reduce((a,b)=>a+b,0);
-  let x=CX-total/2;
+  let x=T.x-total/2;
   cells.forEach((c,i)=>{ const cw=widths[i];
-    if(!(c===':'&&!blink)) placeGlyphCentered(el,c,x+cw/2,790,size,'#111');
+    if(!(c===':'&&!blink)) placeGlyphCentered(el,c,x+cw/2,T.y,size,'#111');
     x+=cw; });
 }
 function renderHintLabel(){
   const c=document.getElementById('hudHint'); c.innerHTML='';
-  const size=28, qsize=26, y=50, padX=24, padY=10, gap=size*0.5, qgap=qsize*0.5;
+  const H=LZ('play','hint',{x:1422,y:50,size:28}); const size=H.size, qsize=26, y=H.y, padX=24, padY=10, gap=size*0.5, qgap=qsize*0.5;
   const labelW=wordWidth('HINT',size), qW=textWidth('?',qsize);
   const innerW=labelW+gap+qW*3+qgap*2;
   const pillW=innerW+padX*2, pillH=size+padY*2;
-  const pillX=1422-pillW, pillY=(y-size)-padY;
+  const pillX=H.x-pillW, pillY=(y-size)-padY;
   // rounded outline (pill)
   const pill=document.createElementNS(NS,'rect');
   pill.setAttribute('x',pillX); pill.setAttribute('y',pillY);
@@ -375,14 +385,15 @@ function renderHintLabel(){
 function _tmpG(parent){ const g=document.createElementNS(NS,'g'); parent.appendChild(g); return g; }
 function renderExit(){
   const c=document.getElementById('hudExit'); c.innerHTML='';
-  const w=placeWord(c,'EXIT',{x:34,y:52,size:26,color:'#999',align:'left'});
-  hitRect(c,28,26,w+12,36,goEditor);
+  const E=LZ('play','exit',{x:34,y:52,size:26,color:'#999'});
+  const w=placeWord(c,'EXIT',{x:E.x,y:E.y,size:E.size,color:E.color,align:'left'});
+  hitRect(c,E.x-6,E.y-26,w+12,36,goEditor);
 }
 function showQuit(){
   const c=document.getElementById('hudQuit'); c.style.display='';
-  const size=26, w=textWidth('QUIT',size);
-  setText(c,'QUIT',{x:1422,y:52,size,color:'#111',align:'right'});
-  hitRect(c,1422-w-6,30,w+12,34,goEditor);
+  const Q=LZ('play','quit',{x:1422,y:52,size:26}); const size=Q.size, w=textWidth('QUIT',size);
+  setText(c,'QUIT',{x:Q.x,y:Q.y,size,color:'#111',align:'right'});
+  hitRect(c,Q.x-w-6,Q.y-22,w+12,34,goEditor);
 }
 
 /* =======================================================================
@@ -548,6 +559,7 @@ function doHint(){
   hintImg.setAttribute('href',src); hintImg.setAttributeNS(XL,'xlink:href',src);
   hintScale.setAttribute('transform',`translate(${CX} ${CY}) scale(${config.hintScale}) translate(${-fx} ${-fy})`);
   hintScreen.style.display='';
+  const HBcfg=LZ('hint','bar',{x:0,y:0,h:8}); hintBar.setAttribute('x',HBcfg.x); hintBar.setAttribute('y',HBcfg.y); hintBar.setAttribute('height',HBcfg.h);
   hintBar.style.display=''; hintBar.setAttribute('width',0);
   const HINT_MS=config.hintMs;
   const t0=performance.now();
@@ -592,20 +604,21 @@ function gameOver(){
   if(won()) return;
   paused=true;
   const ov=document.getElementById('overGameover'); ov.style.display='';
-  setText(document.getElementById('goText'),'GAME OVER',{x:CX,y:380,size:64,color:'#111',align:'center'});
-  const rw=setText(document.getElementById('goRetry'),'RETRY',{x:CX-110,y:470,size:30,color:'#111',align:'center'});
-  hitRect(document.getElementById('goRetry'),CX-110-rw/2-8,440,rw+16,42,()=>location.reload());
-  const ew=setText(document.getElementById('goExit'),'EXIT',{x:CX+110,y:470,size:30,color:'#111',align:'center'});
-  hitRect(document.getElementById('goExit'),CX+110-ew/2-8,440,ew+16,42,goEditor);
+  const GT=LZ('gameover','title',{x:CX,y:380,size:64}), RT=LZ('gameover','retry',{x:CX-110,y:470,size:30}), EX=LZ('gameover','exit',{x:CX+110,y:470,size:30});
+  setText(document.getElementById('goText'),'GAME OVER',{x:GT.x,y:GT.y,size:GT.size,color:'#111',align:'center'});
+  const rw=setText(document.getElementById('goRetry'),'RETRY',{x:RT.x,y:RT.y,size:RT.size,color:'#111',align:'center'});
+  hitRect(document.getElementById('goRetry'),RT.x-rw/2-8,RT.y-30,rw+16,42,()=>location.reload());
+  const ew=setText(document.getElementById('goExit'),'EXIT',{x:EX.x,y:EX.y,size:EX.size,color:'#111',align:'center'});
+  hitRect(document.getElementById('goExit'),EX.x-ew/2-8,EX.y-30,ew+16,42,goEditor);
 }
 function goEditor(){ location.reload(); }  // back to title
 
 // ---- title / start screen: the SWAY-WAYS diagram is shown as a logo ----
 let started=false;
 function startIndicator(container, word, color, align){
-  const x = align==='right'?1422:34;
-  if(TEXTS[word]) placeWord(container, word, {x, y:790, size:30, color, align});
-  else setText(container, '?'.repeat(word.length), {x, y:790, size:30, color, align});
+  const E=LZ('title', align==='right'?'indRed':'indGreen', {x:align==='right'?1422:34, y:790, size:30});
+  if(TEXTS[word]) placeWord(container, word, {x:E.x, y:E.y, size:E.size, color, align});
+  else setText(container, '?'.repeat(word.length), {x:E.x, y:E.y, size:E.size, color, align});
 }
 function renderStartScreen(){
   // title logo: the SWAY/WAYS diagram, drawn with the arrow engine at random positions
@@ -617,19 +630,22 @@ function renderStartScreen(){
   startIndicator(document.getElementById('hudRed'),   RED,   'var(--red)',   'right');
   renderStartButton();
   renderTitleEdit();                   // 左上に EDIT（エディタへ）
+  setLines('title');
   freeDrag=true;                       // title letters float & can be dragged
   requestAnimationFrame(floatLoop);
 }
 function renderTitleEdit(){
   const c=document.getElementById('hudExit'); c.innerHTML='';
-  const w=setText(c,'EDIT',{x:34,y:52,size:26,color:'#999',align:'left'});
-  hitRect(c,28,26,w+12,36,()=>{ location.href='editor.html'; });
+  const E=(window.LAYOUT&&window.LAYOUT.screens.title.elements.edit)||{x:34,y:52,size:26,color:'#999',align:'left',text:'EDIT'};
+  const w=setText(c,E.text||'EDIT',{x:E.x,y:E.y,size:E.size,color:E.color,align:E.align});
+  hitRect(c,E.x-6,E.y-26,w+12,36,()=>{ location.href='editor.html'; });
 }
 function renderStartButton(){
   const c=document.getElementById('hudStart'); c.innerHTML='';
-  const size=34, padX=34, padY=12, y=792;
+  const S=LZ('title','start',{x:CX,y:792,size:34}); const CXb=S.x;
+  const size=S.size, padX=34, padY=12, y=S.y;
   const w=Math.max(wordWidth('READY?',size), wordWidth('START',size));
-  const pillW=w+padX*2, pillH=size+padY*2, pillX=CX-pillW/2, pillY=y-size-padY;
+  const pillW=w+padX*2, pillH=size+padY*2, pillX=CXb-pillW/2, pillY=y-size-padY;
   const pill=document.createElementNS(NS,'rect');
   pill.setAttribute('x',pillX); pill.setAttribute('y',pillY);
   pill.setAttribute('width',pillW); pill.setAttribute('height',pillH);
@@ -637,7 +653,7 @@ function renderStartButton(){
   pill.setAttribute('fill','#fff'); pill.setAttribute('stroke','#222'); pill.setAttribute('stroke-width','2.5');
   c.appendChild(pill);
   const ink=document.createElementNS(NS,'g'); c.appendChild(ink);
-  const label=(word,col)=>{ ink.innerHTML=''; placeWord(ink,word,{x:CX,y,size,color:col,align:'center'}); };
+  const label=(word,col)=>{ ink.innerHTML=''; placeWord(ink,word,{x:CXb,y,size,color:col,align:'center'}); };
   label('READY?','#222');
   const hit=document.createElementNS(NS,'rect');
   hit.setAttribute('class','hit'); hit.setAttribute('x',pillX); hit.setAttribute('y',pillY);
@@ -660,6 +676,7 @@ function startGame(){
   gArrowsLive.innerHTML=''; drawSolved();              // empty board to solve
   placeMarkers();                                     // gameplay markers
   renderExit(); renderHintLabel(); renderIndicators(); renderTimer();
+  setLines('play');
   startTimer();
 }
 

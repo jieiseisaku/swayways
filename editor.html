@@ -34,6 +34,8 @@
 </div>
 <input id="svgPicker" type="file" accept=".svg,image/svg+xml" style="display:none">
 
+<script src="layout.js"></script>
+<script>/* レイアウトエディタのプレビュー：?pv= で渡された LAYOUT を反映 */try{var _pv=new URLSearchParams(location.search).get('pv');if(_pv)window.LAYOUT=JSON.parse(decodeURIComponent(_pv));}catch(e){}</script>
 <script src="glyphs.js"></script>
 <script src="quizzes.js"></script>
 <script src="words.js"></script>
@@ -65,7 +67,10 @@ function glyphMetrics(ch){
 const CAP=(function(){ const m=glyphMetrics('H'); return GLYPHS['H'].b - m.ymin; })();
 const EMK=1.56;                         // em(asc→desc) / cap の概算（行間用）
 const SPACE=0.45;
-const SPACING=0.12;             // 比例詰め後の均一字間（cap比）。default(約0.10)+15%。
+// ---- layout.js（GUIで編集する配置/モーション/タイポ）----
+const _L=window.LAYOUT, TYPO=_L.typography, MO=_L.motion;
+const EE=_L.screens.editEdit.elements, EL2=_L.screens.editList.elements;
+const SPACING=TYPO.spacing;     // 比例詰め後の均一字間（cap比）
 const SYNTH={'-':0.5,'.':0.32,'"':0.42};
 const EM=CAP*EMK;
 const Sf=SPACING*CAP;           // 字間（フォント単位）
@@ -195,7 +200,7 @@ const B={ green:{v:'',c:0,a:0}, red:{v:'',c:0,a:0} };
 let focusBox='green';
 let editingId=null, saved=false, saveMsg='', shakeBox=null;
 
-const BOX={ green:{x:130,y:315,w:400,h:150}, red:{x:700,y:315,w:400,h:150} };
+const BOX={ green:EE.boxGreen, red:EE.boxRed };
 const BOX_MAX=72, BOX_PAD=34;
 
 function gv(){return B.green.v;} function rv(){return B.red.v;}
@@ -239,18 +244,17 @@ function boxIndexAtX(color,clientLocalX){
 function drawEdit(){
   editScreen.innerHTML='';
   const bg=document.createElementNS(NS,'rect'); bg.setAttribute('width',VW); bg.setAttribute('height',VH); bg.setAttribute('fill','#fff'); editScreen.appendChild(bg);
-  const HB=92;   // ヘッダ baseline
-  place(editScreen,'ANAGRAM EDITOR',{x:728,y:HB,size:66,color:COL.ink,align:'center'});
-  place(editScreen,'EXIT',{x:55,y:HB,size:34,color:COL.gray}).classList.add('clk');
-  hit(editScreen,40,HB-34,150,55,()=>{ location.href='index.html'; },'clk');
+  place(editScreen,EE.title.text,{x:EE.title.x,y:EE.title.y,size:EE.title.size,color:EE.title.color,align:EE.title.align});
+  place(editScreen,EE.exit.text,{x:EE.exit.x,y:EE.exit.y,size:EE.exit.size,color:EE.exit.color,align:EE.exit.align}).classList.add('clk');
+  hit(editScreen,EE.exit.x-15,EE.exit.y-34,150,55,()=>{ location.href='index.html'; },'clk');
 
-  // ←LIST（矢印＝ゲーム矢印。hover で20px左、クリックでLISTをスライドイン）
-  const listG=document.createElementNS(NS,'g'); editScreen.appendChild(listG);
-  const lt=place(listG,'LIST',{x:1416,y:HB,size:48,color:COL.ink,align:'right'});
-  const arrowWrap=document.createElementNS(NS,'g'); arrowWrap.classList.add('listbtn'); listG.appendChild(arrowWrap);
-  placeArrow(arrowWrap, lt._x-58, HB, 48, 'left', COL.ink);
-  const lh=hit(editScreen,1245,HB-44,180,62,openList,'clk');
-  lh.addEventListener('mouseenter',()=>arrowWrap.style.transform='translateX(-20px)');
+  // ←LIST（矢印＝ゲーム矢印。hover で矢印オフセット、クリックでLISTをスライドイン）
+  const E=EE.list, listG=document.createElementNS(NS,'g'); editScreen.appendChild(listG);
+  const lt=place(listG,E.text,{x:E.x,y:E.y,size:E.size,color:E.color,align:E.align});
+  const arrowWrap=document.createElementNS(NS,'g'); arrowWrap.classList.add('listbtn'); arrowWrap.style.transition=`transform ${MO.hoverMs}ms ${MO.ease}`; listG.appendChild(arrowWrap);
+  placeArrow(arrowWrap, lt._x-(E.gap||58), E.y, E.size, 'left', E.color);
+  const lh=hit(editScreen,E.x-171,E.y-44,180,62,openList,'clk');
+  lh.addEventListener('mouseenter',()=>arrowWrap.style.transform=`translateX(${-MO.hoverOffset}px)`);
   lh.addEventListener('mouseleave',()=>arrowWrap.style.transform='translateX(0)');
 
   const v=validity();
@@ -259,27 +263,29 @@ function drawEdit(){
 
   // SWAP
   const sw=document.createElementNS(NS,'g'); editScreen.appendChild(sw);
-  place(sw,'SWAP',{x:615,y:372,size:28,color:COL.ink,align:'center'});
-  const line=document.createElementNS(NS,'path'); line.setAttribute('d','M560 395 L670 395'); line.setAttribute('stroke',COL.ink); line.setAttribute('stroke-width',6); sw.appendChild(line);
-  hit(editScreen,555,355,120,80,doSwap,'clk');
+  place(sw,EE.swap.text,{x:EE.swap.x,y:EE.swap.y,size:EE.swap.size,color:EE.swap.color,align:'center'});
+  const line=document.createElementNS(NS,'path'); line.setAttribute('d',`M${EE.swap.x-55} ${EE.swap.y+23} L${EE.swap.x+55} ${EE.swap.y+23}`); line.setAttribute('stroke',EE.swap.color); line.setAttribute('stroke-width',6); sw.appendChild(line);
+  hit(editScreen,EE.swap.x-60,EE.swap.y-17,120,80,doSwap,'clk');
 
   // SAVE
+  const S=EE.save, sx=S.x-S.w/2, sy=S.y-S.h/2;
   const saveG=document.createElementNS(NS,'g'); editScreen.appendChild(saveG);
   const scol=(v.ok&&!saved)?COL.ink:COL.gray;
-  rrect(saveG,1150,358,240,70,35,scol,'#fff');
-  place(saveG,'SAVE',{x:1270,y:407,size:50,color:scol,align:'center'});
-  if(v.ok&&!saved) hit(editScreen,1150,358,240,70,doSave,'clk');
-  if(saveMsg) place(editScreen,saveMsg,{x:1270,y:470,size:26,color:saveMsg==='SUCCESS!'?COL.ink:COL.red,align:'center'});
+  rrect(saveG,sx,sy,S.w,S.h,S.h/2,scol,'#fff');
+  place(saveG,S.text,{x:S.x,y:S.y+S.size*0.28,size:S.size,color:scol,align:'center'});
+  if(v.ok&&!saved) hit(editScreen,sx,sy,S.w,S.h,doSave,'clk');
+  if(saveMsg) place(editScreen,saveMsg,{x:S.x,y:S.y+S.h*1.1,size:26,color:saveMsg==='SUCCESS!'?COL.ink:COL.red,align:'center'});
 
   // IMPORT SVG（保存後のみ可。キャプションは保存名をプレビュー、可になるまで非表示）
+  const I=EE.importBtn, ix=I.x-I.w/2, iy=I.y-I.h/2;
   const impG=document.createElementNS(NS,'g'); editScreen.appendChild(impG);
   const icol=saved?COL.ink:COL.gray;
-  rrect(impG,508,614,440,72,36,icol,'#fff');
-  place(impG,'IMPORT SVG',{x:728,y:664,size:46,color:icol,align:'center'});
+  rrect(impG,ix,iy,I.w,I.h,I.h/2,icol,'#fff');
+  place(impG,I.text,{x:I.x,y:I.y+I.size*0.30,size:I.size,color:icol,align:'center'});
   if(saved){
     const fname=(editingId||window.QUIZ.makeId(gv(),rv()))+'.svg';
-    place(editScreen,'RENAME AS - '+fname.toUpperCase(),{x:728,y:712,size:20,color:COL.gray,align:'center'});
-    hit(editScreen,508,614,440,72,()=>document.getElementById('svgPicker').click(),'clk');
+    place(editScreen,'RENAME AS - '+fname.toUpperCase(),{x:I.x,y:I.y+I.h*0.86,size:20,color:COL.gray,align:'center'});
+    hit(editScreen,ix,iy,I.w,I.h,()=>document.getElementById('svgPicker').click(),'clk');
   }
 }
 
@@ -353,9 +359,9 @@ document.getElementById('svgPicker').addEventListener('change',e=>{
    LIST 画面
    ========================================================================= */
 let selId=null, sortMode='new', sortRev=false, deleteMode=false, listOpen=false;
-const LIST_X=372, COL_R=1110;
-const LIST_SIZE=52, ROW=Math.round(LIST_SIZE*EMK*1.25);   // 行間=文字高さの125%
-const GRID_TOP=92;   // 1行目 baseline（ヘッダと共通グリッド）
+const LIST_X=EL2.grid.x, COL_R=EL2.colEdit.x;
+const LIST_SIZE=EL2.grid.size, ROW=Math.round(LIST_SIZE*EMK*TYPO.lineHeight);   // 行間=文字高さ×lineHeight
+const GRID_TOP=EL2.grid.y;   // 1行目 baseline
 
 function sortedList(){
   let a=LIST.slice();
@@ -370,12 +376,12 @@ function openList(){
   deleteMode=false; drawList();
   listOpen=true; editScreen.style.pointerEvents='none'; listScreen.style.pointerEvents='auto';
   listScreen.style.transition='none'; listScreen.style.transform='translateX('+VW+'px)';
-  requestAnimationFrame(()=>{ listScreen.style.transition='transform .4s ease-out'; listScreen.style.transform='translateX(0)'; });
+  requestAnimationFrame(()=>{ listScreen.style.transition=`transform ${MO.slideMs}ms ${MO.ease}`; listScreen.style.transform='translateX(0)'; });
 }
 function closeList(){
-  listScreen.style.transition='transform .4s ease-out'; listScreen.style.transform='translateX('+VW+'px)';
+  listScreen.style.transition=`transform ${MO.slideMs}ms ${MO.ease}`; listScreen.style.transform='translateX('+VW+'px)';
   listOpen=false; editScreen.style.pointerEvents='auto';
-  setTimeout(()=>{ listScreen.style.pointerEvents='none'; },400);
+  setTimeout(()=>{ listScreen.style.pointerEvents='none'; },MO.slideMs);
 }
 function oneA(size){ return glyphMetrics('A').w*(size/CAP); }
 
@@ -384,16 +390,16 @@ function drawList(){
   const bg=document.createElementNS(NS,'rect'); bg.setAttribute('width',VW); bg.setAttribute('height',VH); bg.setAttribute('fill','#fff'); listScreen.appendChild(bg);
 
   // CLOSE→（ゲーム矢印・右向き）
-  const closeG=document.createElementNS(NS,'g'); listScreen.appendChild(closeG);
-  const ct=place(closeG,'CLOSE',{x:40,y:GRID_TOP,size:50,color:deleteMode?COL.gray:COL.ink});
-  const carrow=document.createElementNS(NS,'g'); carrow.classList.add('listbtn'); closeG.appendChild(carrow);
-  placeArrow(carrow, ct._x+ct._width+14, GRID_TOP, 50, 'right', deleteMode?COL.gray:COL.ink);
-  if(!deleteMode){ const chh=hit(listScreen,30,GRID_TOP-46,300,62,closeList,'clk');
-    chh.addEventListener('mouseenter',()=>carrow.style.transform='translateX(20px)');
+  const C=EL2.close, closeG=document.createElementNS(NS,'g'); listScreen.appendChild(closeG);
+  const ct=place(closeG,C.text,{x:C.x,y:C.y,size:C.size,color:deleteMode?COL.gray:C.color});
+  const carrow=document.createElementNS(NS,'g'); carrow.classList.add('listbtn'); carrow.style.transition=`transform ${MO.hoverMs}ms ${MO.ease}`; closeG.appendChild(carrow);
+  placeArrow(carrow, ct._x+ct._width+(C.gap||14), C.y, C.size, 'right', deleteMode?COL.gray:C.color);
+  if(!deleteMode){ const chh=hit(listScreen,C.x-10,C.y-46,300,62,closeList,'clk');
+    chh.addEventListener('mouseenter',()=>carrow.style.transform=`translateX(${MO.hoverOffset}px)`);
     chh.addEventListener('mouseleave',()=>carrow.style.transform='translateX(0)'); }
 
   // 仕切り線
-  for(const lx of [340,1080]){ const l=document.createElementNS(NS,'line');
+  for(const lx of [EL2.dividerL.x,EL2.dividerR.x]){ const l=document.createElementNS(NS,'line');
     l.setAttribute('x1',lx); l.setAttribute('y1',0); l.setAttribute('x2',lx); l.setAttribute('y2',VH);
     l.setAttribute('stroke',COL.ink); l.setAttribute('stroke-width',2); listScreen.appendChild(l); }
 
@@ -416,11 +422,11 @@ function drawList(){
   drawActions();
 
   // 並べ替え
-  const sorts=[['new','NEW-OLD','OLD-NEW'],['az','A-Z','Z-A'],['len','SHORT-LONG','LONG-SHORT']];
+  const SO=EL2.sort, sorts=[['new','NEW-OLD','OLD-NEW'],['az','A-Z','Z-A'],['len','SHORT-LONG','LONG-SHORT']];
   sorts.forEach((s,i)=>{
     const active=sortMode===s[0]; const label=active&&sortRev?s[2]:s[1];
-    const t=place(listScreen,label,{x:COL_R,y:648+i*54,size:26,color:deleteMode?COL.gray:(active?COL.ink:COL.gray)});
-    if(!deleteMode){ t.classList.add('clk'); hit(listScreen,COL_R-5,648+i*54-26,300,40,()=>{ if(sortMode===s[0]) sortRev=!sortRev; else {sortMode=s[0];sortRev=false;} drawList(); },'clk'); }
+    const t=place(listScreen,label,{x:SO.x,y:SO.y+i*(SO.gap||54),size:SO.size,color:deleteMode?COL.gray:(active?COL.ink:COL.gray)});
+    if(!deleteMode){ t.classList.add('clk'); hit(listScreen,SO.x-5,SO.y+i*(SO.gap||54)-SO.size,300,40,()=>{ if(sortMode===s[0]) sortRev=!sortRev; else {sortMode=s[0];sortRev=false;} drawList(); },'clk'); }
   });
 }
 function drawEntry(row,q,y,colored,dim){
@@ -439,7 +445,7 @@ function drawActions(){
   const sel=LIST.find(q=>q.id===selId);
   const mk=(label,y,color,on)=>{ const t=place(listScreen,label,{x:COL_R,y,size:52,color}); t.classList.add('act'); if(color!==COL.gray) t.classList.add('clk');
     if(on){ const h=hit(listScreen,COL_R-5,y-52,320,ROW,on); h.classList.add('act','clk'); } };
-  const r0=GRID_TOP, r1=GRID_TOP+ROW, r2=GRID_TOP+2*ROW;
+  const r0=EL2.colEdit.y, r1=EL2.colSwap.y, r2=EL2.colDelete.y;
   if(!deleteMode){
     mk('EDIT',r0, sel?COL.ink:COL.gray, sel?doEditSelected:null);
     mk('SWAP',r1, sel?COL.ink:COL.gray, sel?doSwapSelected:null);
@@ -448,12 +454,12 @@ function drawActions(){
     mk('EDIT',r0, COL.gray, null);     // DELETE中もグレーアウトで表示
     mk('SWAP',r1, COL.gray, null);
     mk('DELETE?',r2, COL.red, null);
-    const no=place(listScreen,'NO',{x:COL_R,y:GRID_TOP+3*ROW,size:52,color:COL.ink}); no.classList.add('act','clk');
-    const yes=place(listScreen,'YES',{x:COL_R,y:GRID_TOP+4*ROW,size:52,color:COL.ink}); yes.classList.add('act','clk');
-    const nh=hit(listScreen,COL_R-5,GRID_TOP+3*ROW-52,320,ROW,exitDelete); nh.classList.add('act','clk');
+    const no=place(listScreen,'NO',{x:COL_R,y:r2+ROW,size:52,color:COL.ink}); no.classList.add('act','clk');
+    const yes=place(listScreen,'YES',{x:COL_R,y:r2+2*ROW,size:52,color:COL.ink}); yes.classList.add('act','clk');
+    const nh=hit(listScreen,COL_R-5,r2+ROW-52,320,ROW,exitDelete); nh.classList.add('act','clk');
     nh.addEventListener('mouseenter',()=>no.querySelectorAll('path,rect').forEach(p=>p.getAttribute('fill')&&p.setAttribute('fill',COL.green)));
     nh.addEventListener('mouseleave',()=>no.querySelectorAll('path,rect').forEach(p=>p.getAttribute('fill')&&p.setAttribute('fill',COL.ink)));
-    const yh=hit(listScreen,COL_R-5,GRID_TOP+4*ROW-52,320,ROW,confirmDelete); yh.classList.add('act','clk');
+    const yh=hit(listScreen,COL_R-5,r2+2*ROW-52,320,ROW,confirmDelete); yh.classList.add('act','clk');
     yh.addEventListener('mouseenter',()=>yes.querySelectorAll('path,rect').forEach(p=>p.getAttribute('fill')&&p.setAttribute('fill',COL.red)));
     yh.addEventListener('mouseleave',()=>yes.querySelectorAll('path,rect').forEach(p=>p.getAttribute('fill')&&p.setAttribute('fill',COL.ink)));
   }

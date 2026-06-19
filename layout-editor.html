@@ -90,7 +90,8 @@
   .val{ width:44px; text-align:right; color:var(--md-on-surface-variant); flex:none; font-size:12px; }
 
   /* ===== Align buttons ===== */
-  .alignrow{ display:flex; gap:6px; margin:8px 10px; flex-wrap:wrap; }
+  .alignrow,.insertrow{ display:flex; gap:6px; margin:8px 10px; flex-wrap:wrap; }
+  .insertrow .alignbtn{ flex:1 1 44%; font-size:13px; }
   .alignbtn{ flex:1; min-width:38px; height:34px; border:1px solid var(--md-outline-variant); background:var(--md-surface);
     border-radius:var(--r-xs); color:var(--md-on-surface-variant); cursor:pointer; font-size:15px; transition:background .15s; }
   .alignbtn:hover{ background:var(--state-primary); color:var(--md-primary); border-color:var(--md-primary); }
@@ -133,9 +134,16 @@
   </header>
 
   <aside class="left">
+    <div class="sec">Insert</div>
+    <div class="insertrow">
+      <button class="alignbtn" id="addText">＋ Text</button>
+      <button class="alignbtn" id="addRect">＋ Rect</button>
+      <button class="alignbtn" id="addEllipse">＋ Ellipse</button>
+      <button class="alignbtn" id="addLine">＋ Line</button>
+    </div>
     <div class="sec">Elements</div>
     <div id="elemList"></div>
-    <div class="hint">クリックで選択／キャンバス上でドラッグして移動。<br>矢印キーで1px移動（Shiftで10px）。</div>
+    <div class="hint">クリックで選択／Shift+クリックで複数選択。ドラッグで移動、矢印キーで1px（Shiftで10px）。Deleteで追加要素を削除。</div>
   </aside>
 
   <div id="stageWrap">
@@ -177,7 +185,8 @@ function gm(ch){ if(_mc[ch])return _mc[ch]; const g=GLYPHS[ch]; if(!g)return _mc
   return _mc[ch]={xmin:b.x,ymin:b.y,w:b.width,b:g.b}; }
 const CAP=(function(){const m=gm('H');return GLYPHS['H'].b-m.ymin;})();
 const EMK=1.56, SPACE=0.45, SYNTH={'-':0.5,'.':0.32,'"':0.42};
-function spacing(){ return LAYOUT.typography.spacing; }
+let _ovSpace=null;   // 要素ごとの字間オーバーライド（描画中のみ）
+function spacing(){ return _ovSpace!=null? _ovSpace : LAYOUT.typography.spacing; }
 function Sf(){ return spacing()*CAP; }
 const _prof={};
 function prof(ch){ if(ch in _prof)return _prof[ch]; const gl=GLYPHS[ch]; if(!gl)return _prof[ch]=null;
@@ -238,7 +247,8 @@ function rrect(c,x,y,w,h,r,stroke){ const e=document.createElementNS(NS,'rect');
 function vline(c,x){ const l=document.createElementNS(NS,'line');l.setAttribute('x1',x);l.setAttribute('y1',0);l.setAttribute('x2',x);l.setAttribute('y2',VH);l.setAttribute('stroke',COL.ink);l.setAttribute('stroke-width',2);c.appendChild(l); }
 
 function renderEl(key,el){
-  let bb; const ec=ecolor(el);
+  let bb; const ec=ecolor(el); _ovSpace=(el.spacing!=null?el.spacing:null);
+  const LH=(el.lineHeight!=null?el.lineHeight:LAYOUT.typography.lineHeight);
   if(el.type==='text'||el.type==='swap'){
     place(frame,el.text,{x:el.x,y:el.y,size:el.size,color:ec,align:el.align});
     if(el.type==='swap'){ const ln=document.createElementNS(NS,'path');ln.setAttribute('d',`M${el.x-55} ${el.y+23} L${el.x+55} ${el.y+23}`);ln.setAttribute('stroke',ec);ln.setAttribute('stroke-width',6);frame.appendChild(ln); }
@@ -262,12 +272,12 @@ function renderEl(key,el){
     place(frame,el.text,{x:el.x,y:el.y+el.size*0.28,size:el.size,color:ec,align:'center'});
     bb={x:el.x-el.w/2,y:el.y-el.h/2,w:el.w,h:el.h};
   } else if(el.type==='list'){
-    const ROW=Math.round(el.size*EMK*LAYOUT.typography.lineHeight);
+    const ROW=Math.round(el.size*EMK*LH);
     SAMPLE.forEach((q,i)=>{ const y=el.y+i*ROW; let colors;
       if(i===0){ colors=[]; for(let k=0;k<q[0].length;k++)colors.push(COL.green); colors.push(COL.ink); for(let k=0;k<q[1].length;k++)colors.push(COL.red); }
       else colors=ec;
       place(frame,q[0]+'-'+q[1],{x:el.x,y:y,size:el.size,color:colors}); });
-    bb={x:el.x,y:el.y-el.size,w:480,h:6*Math.round(el.size*EMK*LAYOUT.typography.lineHeight)+el.size};
+    bb={x:el.x,y:el.y-el.size,w:480,h:6*ROW+el.size};
   } else if(el.type==='sort'){
     ['NEW-OLD','A-Z','SHORT-LONG'].forEach((s,i)=>place(frame,s,{x:el.x,y:el.y+i*(el.gap||54),size:el.size,color:i===0?COL.ink:COL.gray}));
     bb={x:el.x,y:el.y-el.size,w:200,h:2*(el.gap||54)+el.size};
@@ -279,7 +289,15 @@ function renderEl(key,el){
   } else if(el.type==='hbar'){
     const r=document.createElementNS(NS,'rect');r.setAttribute('x',el.x);r.setAttribute('y',el.y);r.setAttribute('width',el.w);r.setAttribute('height',el.h);r.setAttribute('fill',ec||COL.ink);frame.appendChild(r);
     bb={x:el.x,y:el.y,w:el.w,h:Math.max(8,el.h)};
+  } else if(el.type==='rect'){
+    const r=document.createElementNS(NS,'rect');r.setAttribute('x',el.x);r.setAttribute('y',el.y);r.setAttribute('width',el.w);r.setAttribute('height',el.h);
+    r.setAttribute('rx',(el.rx||0)*Math.min(el.w,el.h));r.setAttribute('fill',ec||COL.ink);frame.appendChild(r);
+    bb={x:el.x,y:el.y,w:el.w,h:el.h};
+  } else if(el.type==='ellipse'){
+    const e2=document.createElementNS(NS,'ellipse');e2.setAttribute('cx',el.x+el.w/2);e2.setAttribute('cy',el.y+el.h/2);e2.setAttribute('rx',el.w/2);e2.setAttribute('ry',el.h/2);e2.setAttribute('fill',ec||COL.ink);frame.appendChild(e2);
+    bb={x:el.x,y:el.y,w:el.w,h:el.h};
   }
+  _ovSpace=null;
   _bb[key]=bb;
   // ヒット（ドラッグ）
   const h=document.createElementNS(NS,'rect');h.setAttribute('class','ehit');h.setAttribute('x',bb.x);h.setAttribute('y',bb.y);h.setAttribute('width',Math.max(8,bb.w));h.setAttribute('height',Math.max(8,bb.h));
@@ -315,7 +333,8 @@ const FIELDS={ text:['x','y','size','color','align','text'], swap:['x','y','size
   arrowTextL:['x','y','size','color','align','text','gap'], arrowTextR:['x','y','size','color','align','text','gap'],
   box:['x','y','w','h','color'], pill:['x','y','w','h','size','color','text','align'],
   list:['x','y','size','color'], sort:['x','y','size','color','gap'], vline:['x'],
-  hline:['x','y','w','color'], hbar:['x','y','w','h','color'] };
+  hline:['x','y','w','color'], hbar:['x','y','w','h','color'],
+  rect:['x','y','w','h','rx','color'], ellipse:['x','y','w','h','color'] };
 function num(host,label,obj,k,min,max,step){ const f=document.createElement('div');f.className='field';
   f.innerHTML=`<label>${label}</label>`; const inp=document.createElement('input');inp.type='number';inp.value=obj[k];if(step)inp.step=step;
   // Enter またはフォーカスを外したときに確定（1文字ごとには確定しない）
@@ -354,9 +373,46 @@ function buildProps(){
   fs.forEach(k=>{ if(k==='color')col(host,'color',el,k);
     else if(k==='text')txt(host,'text',el,k);
     else if(k==='align')sel(host,'align',el,k,['left','center','right']);
+    else if(k==='rx')numStep(host,'rx (角丸比)',el,k,0,0.5,0.01);
     else num(host,k,el,k); });
+  if(hasText(el)) buildElemTypo(host, el);
+  if(el.added){ const b=document.createElement('button'); b.className='alignbtn'; b.style.margin='10px'; b.style.flex='none'; b.style.minWidth='120px'; b.textContent='🗑 削除'; b.onclick=()=>deleteSel(); host.appendChild(b); }
   buildSwatches();
 }
+function hasText(el){ return ['text','swap','pill','arrowTextL','arrowTextR','list','sort'].indexOf(el.type)>=0; }
+function numStep(host,label,obj,k,min,max,step){ const f=document.createElement('div');f.className='field';f.innerHTML=`<label>${label}</label>`;
+  const inp=document.createElement('input');inp.type='number';inp.min=min;inp.max=max;inp.step=step;inp.value=(obj[k]!=null?obj[k]:0);
+  inp.onchange=()=>{ obj[k]=Math.max(min,Math.min(max,parseFloat(inp.value)||0)); render(); histPush(); };
+  inp.onkeydown=ev=>{ if(ev.key==='Enter') inp.blur(); }; f.appendChild(inp); host.appendChild(f); }
+/* 要素ごとのタイポ（字間・行間の上書き） */
+function buildElemTypo(host, el){
+  const lab=document.createElement('div'); lab.className='sec'; lab.style.margin='6px 8px'; lab.textContent='Typography (この要素)'; host.appendChild(lab);
+  elemSlider(host,'字間 spacing',el,'spacing',0,0.30,0.005,v=>v.toFixed(3),LAYOUT.typography.spacing);
+  if(el.type==='list') elemSlider(host,'行間 line',el,'lineHeight',1.0,2.2,0.05,v=>v.toFixed(2),LAYOUT.typography.lineHeight);
+  const b=document.createElement('button'); b.className='alignbtn'; b.style.margin='4px 10px'; b.style.flex='none'; b.style.minWidth='160px'; b.textContent='グローバルに戻す';
+  b.onclick=()=>{ delete el.spacing; delete el.lineHeight; buildProps(); render(); histPush(); }; host.appendChild(b);
+}
+function elemSlider(host,label,obj,k,min,max,step,fmt,def){ const f=document.createElement('div');f.className='field';
+  f.innerHTML=`<label>${label}</label>`; const r=document.createElement('input');r.type='range';r.min=min;r.max=max;r.step=step;
+  const cur=(obj[k]!=null?obj[k]:def); r.value=cur;
+  const v=document.createElement('span');v.className='val';v.textContent=fmt(cur)+(obj[k]==null?'*':'');
+  r.oninput=()=>{ obj[k]=parseFloat(r.value); v.textContent=fmt(obj[k]); render(); };
+  r.addEventListener('change',histPush); f.appendChild(r);f.appendChild(v);host.appendChild(f); }
+/* 要素の追加 */
+let addSeq=1;
+function newKey(t){ const els=curEls(); let i=addSeq; while(els[t+i]) i++; addSeq=i+1; return t+i; }
+function addElement(type){
+  const defs={
+    text:{label:'Text',type:'text',text:'TEXT',x:728,y:420,size:48,color:'#231815',align:'center'},
+    rect:{label:'Rect',type:'rect',x:628,y:360,w:200,h:120,rx:0.12,color:'#6750A4'},
+    ellipse:{label:'Ellipse',type:'ellipse',x:648,y:330,w:160,h:160,color:'#6750A4'},
+    line:{label:'Line',type:'hline',x:528,y:410,w:400,color:'#231815'}
+  };
+  const d=Object.assign({added:true}, defs[type]); const k=newKey(type==='line'?'line':type);
+  curEls()[k]=d; selKeys=[k]; render(); histPush();
+}
+function deleteSel(){ const els=curEls(); let n=0; selKeys.forEach(k=>{ if(els[k] && els[k].added){ delete els[k]; n++; } });
+  if(n){ selKeys=[]; render(); histPush(); } }
 
 /* ===== 整列（単一=フレーム基準 / 複数=キーオブジェクト基準） ===== */
 function buildAlign(host, multi){
@@ -457,6 +513,7 @@ window.addEventListener('mousemove',ev=>{ if(!drag)return; const p=ptr(ev); cons
   drag.starts.forEach(s=>{ const el=els[s.k]; el.x=Math.round(s.x+dx); if('y' in el && s.y!=null) el.y=Math.round(s.y+dy); }); drag.moved=true; render(); });
 window.addEventListener('mouseup',()=>{ if(drag&&drag.moved) histPush(); drag=null; });
 window.addEventListener('keydown',ev=>{ if(!selKeys.length)return; if(['INPUT','SELECT','TEXTAREA'].indexOf((ev.target.tagName||''))>=0)return;
+  if(ev.key==='Delete'||ev.key==='Backspace'){ ev.preventDefault(); deleteSel(); return; }
   const d=ev.shiftKey?10:1; let used=true; const els=curEls();
   selKeys.forEach(k=>{ const el=els[k];
     if(ev.key==='ArrowLeft')el.x-=d; else if(ev.key==='ArrowRight')el.x+=d;
@@ -509,6 +566,12 @@ undoBtn.onclick=undo; redoBtn.onclick=redo;
 window.addEventListener('keydown',ev=>{ const meta=ev.metaKey||ev.ctrlKey; if(!meta)return;
   if((ev.key==='z'||ev.key==='Z')&&!ev.shiftKey){ ev.preventDefault(); undo(); }
   else if(((ev.key==='z'||ev.key==='Z')&&ev.shiftKey)||ev.key==='y'){ ev.preventDefault(); redo(); } });
+
+/* ===== 追加ボタン ===== */
+document.getElementById('addText').onclick=()=>addElement('text');
+document.getElementById('addRect').onclick=()=>addElement('rect');
+document.getElementById('addEllipse').onclick=()=>addElement('ellipse');
+document.getElementById('addLine').onclick=()=>addElement('line');
 
 /* ===== 起動 ===== */
 autoLinkSwatches(); buildTabs(); buildGlobals(); render(); histPush();

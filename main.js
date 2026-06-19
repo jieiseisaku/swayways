@@ -55,7 +55,7 @@ function glyphMetrics(ch){
 }
 let CAPH=0;
 const SPACE_W=0.45;
-const SPACING=(window.LAYOUT&&window.LAYOUT.typography&&window.LAYOUT.typography.spacing)||0.12;   // 比例詰め後の均一字間（cap比）
+let SPACING=(window.LAYOUT&&window.LAYOUT.typography&&window.LAYOUT.typography.spacing)||0.12;   // 比例詰め後の均一字間。追加要素描画時に一時上書き。
 // グリフ輪郭の左右プロファイル（baseline基準の y バンドごと min/max x）
 const _prof={};
 function glyphProfile(ch){
@@ -610,6 +610,7 @@ function gameOver(){
   hitRect(document.getElementById('goRetry'),RT.x-rw/2-8,RT.y-30,rw+16,42,()=>location.reload());
   const ew=setText(document.getElementById('goExit'),'EXIT',{x:EX.x,y:EX.y,size:EX.size,color:'#111',align:'center'});
   hitRect(document.getElementById('goExit'),EX.x-ew/2-8,EX.y-30,ew+16,42,goEditor);
+  renderExtras('gameover', ov, false);
 }
 function goEditor(){ location.reload(); }  // back to title
 
@@ -619,6 +620,19 @@ function startIndicator(container, word, color, align){
   const E=LZ('title', align==='right'?'indRed':'indGreen', {x:align==='right'?1422:34, y:790, size:30});
   if(TEXTS[word]) placeWord(container, word, {x:E.x, y:E.y, size:E.size, color, align});
   else setText(container, '?'.repeat(word.length), {x:E.x, y:E.y, size:E.size, color, align});
+}
+// レイアウトエディタで追加した要素（テキスト/図形）を各シーンに描画
+function renderExtras(screenKey, container, clear){
+  const c=container||document.getElementById('gExtras'); if(!c) return;
+  if(clear!==false) c.innerHTML='';
+  const sc=window.LAYOUT&&window.LAYOUT.screens[screenKey]; if(!sc) return; const els=sc.elements||{};
+  for(const k in els){ const el=els[k]; if(!el.added) continue; const prev=SPACING; if(el.spacing!=null) SPACING=el.spacing;
+    if(el.type==='text'){ const g=document.createElementNS(NS,'g'); c.appendChild(g); setText(g, el.text||'', {x:el.x,y:el.y,size:el.size,color:el.color,align:el.align}); }
+    else if(el.type==='rect'){ const r=document.createElementNS(NS,'rect');r.setAttribute('x',el.x);r.setAttribute('y',el.y);r.setAttribute('width',el.w);r.setAttribute('height',el.h);r.setAttribute('rx',(el.rx||0)*Math.min(el.w,el.h));r.setAttribute('fill',el.color);c.appendChild(r); }
+    else if(el.type==='ellipse'){ const e=document.createElementNS(NS,'ellipse');e.setAttribute('cx',el.x+el.w/2);e.setAttribute('cy',el.y+el.h/2);e.setAttribute('rx',el.w/2);e.setAttribute('ry',el.h/2);e.setAttribute('fill',el.color);c.appendChild(e); }
+    else if(el.type==='hline'){ const l=document.createElementNS(NS,'line');l.setAttribute('x1',el.x);l.setAttribute('y1',el.y);l.setAttribute('x2',el.x+el.w);l.setAttribute('y2',el.y);l.setAttribute('stroke',el.color);l.setAttribute('stroke-width',2);c.appendChild(l); }
+    SPACING=prev;
+  }
 }
 function renderStartScreen(){
   // title logo: the SWAY/WAYS diagram, drawn with the arrow engine at random positions
@@ -630,7 +644,7 @@ function renderStartScreen(){
   startIndicator(document.getElementById('hudRed'),   RED,   'var(--red)',   'right');
   renderStartButton();
   renderTitleEdit();                   // 左上に EDIT（エディタへ）
-  setLines('title');
+  setLines('title'); renderExtras('title');
   freeDrag=true;                       // title letters float & can be dragged
   requestAnimationFrame(floatLoop);
 }
@@ -676,7 +690,7 @@ function startGame(){
   gArrowsLive.innerHTML=''; drawSolved();              // empty board to solve
   placeMarkers();                                     // gameplay markers
   renderExit(); renderHintLabel(); renderIndicators(); renderTimer();
-  setLines('play');
+  setLines('play'); renderExtras('play');
   startTimer();
 }
 

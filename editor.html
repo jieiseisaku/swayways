@@ -70,10 +70,10 @@ const SPACE=0.45;
 // ---- layout.js（GUIで編集する配置/モーション/タイポ）----
 const _L=window.LAYOUT, TYPO=_L.typography, MO=_L.motion;
 const EE=_L.screens.editEdit.elements, EL2=_L.screens.editList.elements;
-const SPACING=TYPO.spacing;     // 比例詰め後の均一字間（cap比）
+let SPACING=TYPO.spacing;       // 比例詰め後の均一字間（cap比）。追加要素描画時に一時上書き。
 const SYNTH={'-':0.5,'.':0.32,'"':0.42};
 const EM=CAP*EMK;
-const Sf=SPACING*CAP;           // 字間（フォント単位）
+function Sf(){ return SPACING*CAP; }   // 字間（フォント単位）
 
 // グリフ輪郭の左右プロファイル（baseline基準の y バンドごと min/max x）→ 光学カーニング用
 const _prof={};
@@ -96,11 +96,11 @@ function glyphProfile(ch){
 function pairAdvance(a,b){
   const pa=glyphProfile(a), pb=glyphProfile(b);
   const aw=pa?(pa.xmax-pa.xmin):(glyphMetrics(a).w);
-  if(!pa||!pb) return aw+Sf;
+  if(!pa||!pb) return aw+Sf();
   let K=Infinity;
   for(const k in pa.bands){ const e=pb.bands[k]; if(e){ const v=(pa.xmax-pa.bands[k].mx)+(e.mn-pb.xmin); if(v<K)K=v; } }
   if(!isFinite(K)) K=0;
-  return aw+Sf-K;
+  return aw+Sf()-K;
 }
 // 各文字のキャレットx（px）配列と総幅
 function layoutPx(str,size){
@@ -110,7 +110,7 @@ function layoutPx(str,size){
     let advc;
     if(i===chars.length-1) advc=w;
     else if(ch!==' '&&nx!==' '&&GLYPHS[ch]&&GLYPHS[nx]) advc=pairAdvance(ch,nx)*sc;
-    else advc=w+Sf*sc;
+    else advc=w+Sf()*sc;
     cur+=advc; pos.push(cur);
   }
   return {pos,w:cur,sc};
@@ -241,6 +241,17 @@ function boxIndexAtX(color,clientLocalX){
   return best;
 }
 
+// レイアウトエディタで追加した要素（テキスト/図形）を描画
+function renderExtras(screenKey, container){
+  const sc=window.LAYOUT.screens[screenKey]; if(!sc) return; const els=sc.elements||{};
+  for(const k in els){ const el=els[k]; if(!el.added) continue; const prev=SPACING; if(el.spacing!=null) SPACING=el.spacing;
+    if(el.type==='text'){ place(container, el.text||'', {x:el.x,y:el.y,size:el.size,color:el.color,align:el.align}); }
+    else if(el.type==='rect'){ const r=document.createElementNS(NS,'rect');r.setAttribute('x',el.x);r.setAttribute('y',el.y);r.setAttribute('width',el.w);r.setAttribute('height',el.h);r.setAttribute('rx',(el.rx||0)*Math.min(el.w,el.h));r.setAttribute('fill',el.color);container.appendChild(r); }
+    else if(el.type==='ellipse'){ const e=document.createElementNS(NS,'ellipse');e.setAttribute('cx',el.x+el.w/2);e.setAttribute('cy',el.y+el.h/2);e.setAttribute('rx',el.w/2);e.setAttribute('ry',el.h/2);e.setAttribute('fill',el.color);container.appendChild(e); }
+    else if(el.type==='hline'){ const l=document.createElementNS(NS,'line');l.setAttribute('x1',el.x);l.setAttribute('y1',el.y);l.setAttribute('x2',el.x+el.w);l.setAttribute('y2',el.y);l.setAttribute('stroke',el.color);l.setAttribute('stroke-width',2);container.appendChild(l); }
+    SPACING=prev;
+  }
+}
 function drawEdit(){
   editScreen.innerHTML='';
   const bg=document.createElementNS(NS,'rect'); bg.setAttribute('width',VW); bg.setAttribute('height',VH); bg.setAttribute('fill','#fff'); editScreen.appendChild(bg);
@@ -287,6 +298,7 @@ function drawEdit(){
     place(editScreen,'RENAME AS - '+fname.toUpperCase(),{x:I.x,y:I.y+I.h*0.86,size:20,color:COL.gray,align:'center'});
     hit(editScreen,ix,iy,I.w,I.h,()=>document.getElementById('svgPicker').click(),'clk');
   }
+  renderExtras('editEdit', editScreen);
 }
 
 function drawBox(color,valid){
@@ -428,6 +440,7 @@ function drawList(){
     const t=place(listScreen,label,{x:SO.x,y:SO.y+i*(SO.gap||54),size:SO.size,color:deleteMode?COL.gray:(active?COL.ink:COL.gray)});
     if(!deleteMode){ t.classList.add('clk'); hit(listScreen,SO.x-5,SO.y+i*(SO.gap||54)-SO.size,300,40,()=>{ if(sortMode===s[0]) sortRev=!sortRev; else {sortMode=s[0];sortRev=false;} drawList(); },'clk'); }
   });
+  renderExtras('editList', listScreen);
 }
 function drawEntry(row,q,y,colored,dim){
   const txt=q.green+'-'+q.red;

@@ -521,9 +521,10 @@ function zigzag(x1,y1,x2,y2){
   return d;
 }
 
-// ---- timer ----
-let timeLeft=START_TIME, paused=false;
+// ---- timer（5問通しで1本。クリアごとに config.clearBonus 加算） ----
+let timeLeft=START_TIME, paused=false, timerStarted=false;
 function startTimer(){
+  if(timerStarted) return; timerStarted=true;
   setInterval(()=>{ if(paused) return; timeLeft--; if(timeLeft<=0){ timeLeft=0; renderTimer(); gameOver(); } else renderTimer(); },1000);
   setInterval(()=>{ if(paused) return; blink=!blink; if(!won()) renderTimer(); },500);
 }
@@ -535,12 +536,11 @@ const hintScale=document.getElementById('hintScale');
 const hintBar=document.getElementById('hintBar');
 const hintImg=document.getElementById('hintImg');
 const winImg=document.getElementById('winImg');
-// 図（ヒント/勝利イラスト）は登録クイズの hint から取得。SVGは svg/ フォルダ。
-const CUR_QUIZ=window.QUIZ.resolve(GAME_G,GAME_R);
-const HINT_NAME=CUR_QUIZ.hint||window.QUIZ.defaultHintName(CUR_QUIZ.id);   // hints are for the game puzzle
-const WIN_SRC=window.QUIZ.hintPath(HINT_NAME,'both');
+// 図（ヒント/勝利イラスト）は「今の問題」の hint から取得。loadQuiz で更新（5問連続のため可変）。
+let CUR_QUIZ=window.QUIZ.resolve(GAME_G,GAME_R);
+let HINT_NAME=CUR_QUIZ.hint||window.QUIZ.defaultHintName(CUR_QUIZ.id);
+let WIN_SRC=window.QUIZ.hintPath(HINT_NAME,'both');
 const XL='http://www.w3.org/1999/xlink';
-// win illustration: full (both colours)
 winImg.setAttribute('href',WIN_SRC); winImg.setAttributeNS(XL,'xlink:href',WIN_SRC);
 // per-use hint config: 1st red@400%, 2nd green@400%, 3rd both@200%
 // random focus that keeps the zoom window over the colour's artwork (most of the screen = object)
@@ -575,16 +575,88 @@ function endHint(){
   if(hintUses<=0){ const c=document.getElementById('hudHint'); /* keep label, just no action */ }
 }
 
-// ---- win / game over ----
+// ---- run（5問連続） / win / game over ----
+let RUN={ list:[], i:0 }, transitioning=false;
+function pickRun(){
+  const a=(window.QUIZZES||[]).slice();
+  for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=a[i]; a[i]=a[j]; a[j]=t; }   // shuffle
+  return a.slice(0, Math.min(config.runQuizzes||5, a.length));
+}
+// 1問ロード（タイマーは継続。盤面・ヒント・状態はリセット）
+function loadQuiz(idx){
+  const q=RUN.list[idx]; CUR_QUIZ=q;
+  HINT_NAME=q.hint||window.QUIZ.defaultHintName(q.id); WIN_SRC=window.QUIZ.hintPath(HINT_NAME,'both');
+  winImg.setAttribute('href',WIN_SRC); winImg.setAttributeNS(XL,'xlink:href',WIN_SRC); winImg.style.display='none';
+  active=null; cleared=false; freeDrag=false; sorting=false; hintUses=config.hintCount;
+  curBoard={tx:0,ty:0,s:1}; boardG.setAttribute('transform','translate(0 0) scale(1)');
+  document.getElementById('hudStart').innerHTML=''; document.getElementById('hudHint').style.display='';
+  setWords(q.green, q.red); positions=defaultPositions(); placeLetters(); computeGeo();
+  gArrowsLive.innerHTML=''; drawSolved(); placeMarkers();
+  renderExit(); renderHintLabel(); renderIndicators(); renderTimer(); setLines('play'); renderExtras('play');
+  paused=false;                                     // resume the shared timer
+}
 function onWin(){
-  renderTimer();                                   // timer -> CLEAR! (text.svg)
+  if(cleared) return;
+  timeLeft += (config.clearBonus||0);               // クリアボーナス
+  paused=true;                                       // クリア画面中はタイマー停止
+  renderTimer();                                    // timer -> CLEAR!
   document.getElementById('hudHint').style.display='none';
   curBoard={tx:30,ty:10,s:0.55};                    // clear screen: shrink anagram
   boardG.setAttribute('transform',`translate(${curBoard.tx} ${curBoard.ty}) scale(${curBoard.s})`);
   winImg.style.display='';                          // reveal the illustration
   cleared = true; freeDrag = true;                  // letters stay draggable, arrows follow
-  requestAnimationFrame(floatLoop);                 // letters drift gently to show they're touchable
+  requestAnimationFrame(floatLoop);
+  renderNextButton();                               // NEXT で次の問題へ
 }
+// クリア画面の NEXT ボタン
+function renderNextButton(){
+  const c=document.getElementById('hudStart'); c.innerHTML='';
+  const size=40, padX=44, padY=14, y=700;
+  const tw=textWidth('NEXT',size), pillW=tw+padX*2, pillH=size+padY*2, pillX=CX-pillW/2, pillY=y-pillH/2;
+  const pill=document.createElementNS(NS,'rect');
+  pill.setAttribute('x',pillX); pill.setAttribute('y',pillY); pill.setAttribute('width',pillW); pill.setAttribute('height',pillH);
+  pill.setAttribute('rx',pillH/2); pill.setAttribute('fill','#fff'); pill.setAttribute('stroke','#222'); pill.setAttribute('stroke-width','2.5');
+  c.appendChild(pill);
+  const ink=document.createElementNS(NS,'g'); c.appendChild(ink);
+  const label=col=>{ ink.innerHTML=''; setText(ink,'NEXT',{x:CX,y:y+size*0.36,size,color:col,align:'center'}); };
+  label('#222');
+  const hit=document.createElementNS(NS,'rect'); hit.setAttribute('class','hit');
+  hit.setAttribute('x',pillX); hit.setAttribute('y',pillY); hit.setAttribute('width',pillW); hit.setAttribute('height',pillH); hit.setAttribute('rx',pillH/2);
+  hit.addEventListener('mouseenter',()=>{ pill.setAttribute('fill','#000'); pill.setAttribute('stroke','#000'); label('#fff'); });
+  hit.addEventListener('mouseleave',()=>{ pill.setAttribute('fill','#fff'); pill.setAttribute('stroke','#222'); label('#222'); });
+  hit.addEventListener('click', runNext);
+  hit.addEventListener('touchstart', e=>{e.preventDefault(); runNext();}, {passive:false});
+  c.appendChild(hit);
+}
+// NEXT 押下 → ヒントと同じプログレスバー → 完了で次の問題（or ALL CLEAR）
+function runNext(){
+  if(transitioning) return; transitioning=true;
+  document.getElementById('hudStart').innerHTML='';
+  hintBar.setAttribute('x',0); hintBar.setAttribute('y',0); hintBar.setAttribute('height',8); hintBar.setAttribute('width',0);
+  hintBar.style.display='';
+  const t0=performance.now(), MS=config.nextMs||1500;
+  (function grow(t){ const k=Math.min(1,(t-t0)/MS); hintBar.setAttribute('width',VW*k);
+    if(k<1) requestAnimationFrame(grow);
+    else { hintBar.style.display='none'; transitioning=false;
+      RUN.i++; if(RUN.i>=RUN.list.length) allClear(); else loadQuiz(RUN.i); } })(t0);
+}
+// 5問クリア → ALL CLEAR（クリアした絵を一様表示・レイアウトは仮）→ タップでタイトル
+function allClear(){
+  paused=true; freeDrag=false; started=false;
+  const ov=document.getElementById('overAllClear'); ov.style.display=''; ov.innerHTML='';
+  const bg=document.createElementNS(NS,'rect'); bg.setAttribute('width',VW); bg.setAttribute('height',VH); bg.setAttribute('fill','#fff'); ov.appendChild(bg);
+  setText(_subg(ov),'ALL CLEAR',{x:CX,y:170,size:78,color:'#111',align:'center'});
+  // クリアした問題の絵を一様に並べる（仮レイアウト）
+  const n=RUN.list.length, cellW=Math.min(260, (VW-120)/n), cw=cellW*0.92, startX=CX-(n*cellW)/2, y=300;
+  RUN.list.forEach((q,i)=>{ const src=window.QUIZ.hintPath(q.hint||window.QUIZ.defaultHintName(q.id),'both');
+    const im=document.createElementNS(NS,'image'); im.setAttribute('x',startX+i*cellW+(cellW-cw)/2); im.setAttribute('y',y);
+    im.setAttribute('width',cw); im.setAttribute('height',cw); im.setAttribute('preserveAspectRatio','xMidYMid meet');
+    im.setAttribute('href',src); im.setAttributeNS(XL,'xlink:href',src); ov.appendChild(im); });
+  setText(_subg(ov),'TAP TO TITLE',{x:CX,y:660,size:28,color:'#999',align:'center'});
+  const hit=document.createElementNS(NS,'rect'); hit.setAttribute('class','hit'); hit.setAttribute('x',0); hit.setAttribute('y',0); hit.setAttribute('width',VW); hit.setAttribute('height',VH);
+  hit.addEventListener('click',()=>location.reload()); ov.appendChild(hit);
+}
+function _subg(parent){ const g=document.createElementNS(NS,'g'); parent.appendChild(g); return g; }
 // each letter drifts in its own random direction and the arrows follow; a grabbed letter holds still
 function floatLoop(ts){
   if(!freeDrag) return;
@@ -683,15 +755,10 @@ function startGame(){
   started=true; freeDrag=false; active=null;           // stop the title float/drag; colour not yet chosen
   document.getElementById('hudStart').innerHTML='';   // remove READY? button
   document.getElementById('hudGreen').innerHTML=''; document.getElementById('hudRed').innerHTML='';
-  // switch to the actual puzzle (STEP / PETS) with a fresh random layout
-  setWords(GAME_G, GAME_R);
-  positions=defaultPositions();
-  placeLetters(); computeGeo();
-  gArrowsLive.innerHTML=''; drawSolved();              // empty board to solve
-  placeMarkers();                                     // gameplay markers
-  renderExit(); renderHintLabel(); renderIndicators(); renderTimer();
-  setLines('play'); renderExtras('play');
+  RUN={ list: pickRun(), i:0 };                         // 毎回ランダムに5問
+  timeLeft = START_TIME;                                // 5問通しで1本のタイマー
   startTimer();
+  loadQuiz(0);                                          // 1問目をロード
 }
 
 // ---- wire up ----

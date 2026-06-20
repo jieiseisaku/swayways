@@ -3,8 +3,11 @@ window.CONFIG = {
   titleWords: { green: "SWAY", red: "WAYS" },   // タイトルロゴの語（常にSWAY/WAYS）
   gameWords:  { green: "STEP", red: "PETS" },    // READY?で始まるクイズ
 
-  timerSeconds: 120,   // カウントダウン
-  hintCount: 3,        // ヒント回数
+  timerSeconds: 120,   // カウントダウン（5問通しで1本）
+  runQuizzes: 5,       // 1ランの問題数（登録から毎回ランダム）
+  clearBonus: 10,      // 1問クリアごとに加算される秒数
+  nextMs: 1500,        // NEXT のプログレスバー時間（次の問題開始まで）
+  hintCount: 3,        // ヒント回数（1問ごとにリセット）
   hintMs: 5000,        // 1回の表示秒
   hintScale: 4,        // ヒントの拡大率（400%固定）
   // 盤面座標の各色コンテンツ範囲 [x,y,w,h]。ヒントはこの範囲内でランダムに寄せ、過半数が画面に入るようにする
